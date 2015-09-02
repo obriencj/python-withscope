@@ -33,7 +33,7 @@ with let(a="pizza", b="beer") as my_scope:
 print a # >>> NameError: name 'a' is not defined
 
 with my_scope:
-	print "%s and %b" % (a, b) # >>> "popcorn and water"
+	print "%s and %s" % (a, b) # >>> "popcorn and water"
 ```
 
 Yes really, that works. It will correctly fall-through to outer scopes
