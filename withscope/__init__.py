@@ -112,6 +112,7 @@ class Scope(object):
         self.outer_cells = None
         self.inner_locals = None
         self.inner_globals = None
+        self.inner_cells = None
 
         self.defined = dict(*args, **kwds)
 
@@ -122,7 +123,11 @@ class Scope(object):
 
         # store our existing cells, then recreate them
         self.outer_cells = frame_getcells(caller)
-        frame_recreatecells(caller)
+        if self.inner_cells is None:
+            frame_recreatecells(caller)
+            self.inner_cells = frame_getcells(caller)
+        else:
+            frame_setcells(caller, self.inner_cells)
 
         self.outer_locals = caller.f_locals
         if self.inner_locals is None:
