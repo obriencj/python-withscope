@@ -16,11 +16,15 @@
 
 
 /**
-  This is just to permit me to change the values of cells conveniently,
-  which is absolutely necessary in order to pickle recursive function
-  definitions.
+   This enables the overridding of locals and cells in a call frame,
+   and is used to enable the effect of pushing/popping local lexical
+   scopes.
 
-  author: Christopher O'Brien  <obriencj@gmail.com>
+   TODO: there are all sorts of safety checks that need to be
+   added. Type checking, length checking. I'll get to those at some
+   point.
+
+   author: Christopher O'Brien  <obriencj@gmail.com>
 */
 
 
@@ -30,6 +34,10 @@
 #include <tupleobject.h>
 
 
+/**
+   Sets the locals dict for a call frame, and refreshes the fast
+   access vars from that dict.
+ */
 static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
@@ -48,6 +56,9 @@ static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
 }
 
 
+/**
+   Sets the globals dict for a call frame
+ */
 static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
@@ -64,6 +75,10 @@ static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
 }
 
 
+/**
+   Goes over the cells in a call frame and duplicates them, swapping
+   the new cells into the old cell's place.
+ */
 static PyObject *frame_recreatecells(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
 
@@ -98,6 +113,10 @@ static PyObject *frame_recreatecells(PyObject *self, PyObject *args) {
 }
 
 
+/**
+   Collect the cells from fast locals in a call frame as a new
+   tuple. The order is compatible with frame_setcells.
+ */
 static PyObject *frame_getcells(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *cells = NULL;
@@ -134,6 +153,10 @@ static PyObject *frame_getcells(PyObject *self, PyObject *args) {
 }
 
 
+/**
+   Replace the cells in a call frame's fast locals with those from a
+   tuple. The order should be the same as from frame_getcells.
+ */
 static PyObject *frame_setcells(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *cells = NULL;
@@ -199,8 +222,7 @@ static PyMethodDef methods[] = {
 
 
 PyMODINIT_FUNC init_frame() {
-  PyObject *mod;
-  mod = Py_InitModule("withscope._frame", methods);
+  Py_InitModule("withscope._frame", methods);
 }
 
 

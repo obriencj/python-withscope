@@ -23,7 +23,7 @@ this.
 """
 
 
-__all__ = ("let")
+__all__ = ( "let", )
 
 
 from inspect import currentframe
@@ -32,6 +32,10 @@ from ._frame import frame_setlocals, frame_setglobals, \
 
 
 class LayeredDict(dict):
+    """
+    A dict that will store an initial set of values, and will
+    otherwise fall-through to read/write values from a baseline dict.
+    """
 
     def __init__(self, baseline, *args, **kwds):
         self.baseline = baseline
@@ -105,6 +109,15 @@ class LayeredDict(dict):
 
 
 class Scope(object):
+    """
+    A lexical scope, activated and revoked via the python managed
+    interface methods (the `with` keyword).
+
+    When created, specify the lexical bindings as parameters. When
+    the scope is entered, those bindings will override the current
+    frame's bindings for both reading and writing. When the scope
+    is exited, the original bindings are restored.
+    """
 
     def __init__(self, *args, **kwds):
         self.outer_locals = None
@@ -116,12 +129,20 @@ class Scope(object):
 
         self.defined = dict(*args, **kwds)
 
+
     def __enter__(self):
+        """
+        Push our bindings, by hacking at the calling frame's locals,
+        globals, and fast var cells.
+        """
+
         #print "__enter__ for %08x" % id(self)
 
         caller = currentframe().f_back
 
         # store our existing cells, then recreate them
+        # TODO: we should only really be doing this for the cells in our
+        # bindings.
         self.outer_cells = frame_getcells(caller)
         if self.inner_cells is None:
             frame_recreatecells(caller)
@@ -129,6 +150,8 @@ class Scope(object):
         else:
             frame_setcells(caller, self.inner_cells)
 
+        # store the existing locals, then create a layer atop that and
+        # swap into place.
         self.outer_locals = caller.f_locals
         if self.inner_locals is None:
             self.inner_locals = LayeredDict(self.outer_locals, self.defined)
@@ -141,12 +164,16 @@ class Scope(object):
         # going to pretend they are global values for the duration of
         # the scope
 
+        # TODO: like with cells, we should only be replacing the
+        # values in our bindings.
         self.outer_globals = caller.f_globals
 
-        #if self.inner_globals is None:
-        #    self.inner_globals = LayeredDict(self.outer_globals, self.defined)
-        #else:
-        #    self.inner_globals.baseline = self.outer_globals
+        # can't use a LayeredDict for globals -- it only accepts pure
+        # dict instances apparently.
+
+        # TODO: this is likely buggy. We need to properly fetch our
+        # values back out from globals when we pop the stack, so that
+        # we can re-apply.
         self.inner_globals = dict(self.outer_globals)
         self.inner_globals.update(self.defined)
 
@@ -154,7 +181,12 @@ class Scope(object):
 
         return self
 
+
     def __exit__(self, exc_type, _exc_val, _exc_tb):
+        """
+        Pop our bindings
+        """
+
         #print "__exit__ for %08x" % id(self)
 
         caller = currentframe().f_back
@@ -167,9 +199,16 @@ class Scope(object):
         frame_setlocals(caller, self.outer_locals)
         frame_setglobals(caller, self.outer_globals)
 
+        self.outer_cells = None
+        self.outer_locals = None
+        self.outer_globals = None
+
         return exc_type is None
 
 
+"""
+provide a happy little binding for the Scope class
+"""
 let = Scope
 
 
