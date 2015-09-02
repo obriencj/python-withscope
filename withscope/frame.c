@@ -19,6 +19,8 @@
   This is just to permit me to change the values of cells conveniently,
   which is absolutely necessary in order to pickle recursive function
   definitions.
+
+  author: Christopher O'Brien  <obriencj@gmail.com>
 */
 
 
