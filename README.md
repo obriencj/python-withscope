@@ -2,7 +2,8 @@
 
 This is a completely mad idea, to create a working "let" syntax for
 [Python]. It should be regarded as a freak of nature and not used for
-anything serious.
+anything serious. I did it because I was pretty sure I could, but I
+wanted to be certain.
 
 [python]: http://python.org "Python"
 
@@ -35,9 +36,30 @@ with my_scope:
 	print "%s and %b" % (a, b) # >>> "popcorn and water"
 ```
 
-Yes really, that works. It also functions correctly with closures,
-giving you a new set of cells to capture while you're inside a new
-scope.
+Yes really, that works. It will correctly fall-through to outer scopes
+as well
+
+```python
+
+monster = "godzilla"
+city = "Tokyo"
+
+print "%s is attacking %s" % (monster, city)
+# >>> "godzilla is attacking Tokyo"
+
+with let(monster="mothra"):
+	print "%s is attacking %s" % (monster, city)
+	# >>> "mothra is attacking Tokyo"
+
+	city = "New York"
+
+print "%s is attacking %s" % (monster, city)
+# >>> "godzilla is attacking New York"
+```
+
+It also functions correctly with closures, giving you a new set of
+cells to capture while you're inside a new scope, then returning the
+original cells to their place when the scope ends.
 
 
 ## Requirements
