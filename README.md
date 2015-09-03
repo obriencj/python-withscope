@@ -106,6 +106,10 @@ python setup.py test
 
 I could probably optimize it? Or not? Who cares?
 
+Currently it modifies the frame -- it might be better to actually
+create a new frame, swap it into place, and then swap it back out
+again. Something to think about.
+
 
 ## Author
 
