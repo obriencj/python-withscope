@@ -31,10 +31,11 @@ from ._frame import frame_setlocals, frame_setglobals, \
     frame_recreatecells, frame_setcells, frame_getcells
 
 
-class LayeredDict(dict):
+class LayeredMapping(object):
     """
-    A dict that will store an initial set of values, and will
-    otherwise fall-through to read/write values from a baseline dict.
+    A dict-like object that will store an initial set of values, and
+    will otherwise fall-through to read/write values from a baseline
+    dict.
     """
 
     def __init__(self, baseline, defined):
@@ -160,7 +161,8 @@ class Scope(object):
         # swap into place.
         self._outer_locals = caller.f_locals
         if self._inner_locals is None:
-            self._inner_locals = LayeredDict(self._outer_locals, self.defined)
+            layered = LayeredMapping(self._outer_locals, self.defined)
+            self._inner_locals = layered
         else:
             self._inner_locals.baseline = self._outer_locals
         frame_setlocals(caller, self._inner_locals)
