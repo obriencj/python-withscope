@@ -55,8 +55,11 @@ class LayeredDict(dict):
         else:
             self.baseline[key] = value
 
-    #def __delitem__(self, key):
-    #    pass
+    def __delitem__(self, key):
+        if dict.__contains__(self, key):
+            dict.__delitem__(self, key)
+        else:
+            self.baseline.__delitem__(key)
 
     def __iter__(self):
         for key in self.baseline:
@@ -141,10 +144,12 @@ class Scope(object):
         caller = currentframe().f_back
 
         # store our existing cells, then recreate them
-        # TODO: we should only really be doing this for the cells in our
-        # bindings.
         self.outer_cells = frame_getcells(caller)
         if self.inner_cells is None:
+            # TODO: we should only really be doing this for the cells
+            # in our bindings. Need to update the recreatecells call
+            # so that it accepts the defined dict and will only
+            # recreate a cell bound to a defined name.
             frame_recreatecells(caller)
             self.inner_cells = frame_getcells(caller)
         else:
@@ -159,22 +164,19 @@ class Scope(object):
             self.inner_locals.baseline = self.outer_locals
         frame_setlocals(caller, self.inner_locals)
 
+        self.outer_globals = caller.f_globals
+
+        # can't use a LayeredDict for globals -- it only accepts pure
+        # dict instances apparently. This is fine, since any
+        # assignment would actually cause a write to locals rather
+        # than globals, we only need globals in place to find
+        # variables not already defined via normal syntax.
+        self.inner_globals = dict(self.outer_globals)
+
         # todo: create a smaller defined set, of ONLY those defined
         # names which aren't in the frame's locals already -- we're
         # going to pretend they are global values for the duration of
         # the scope
-
-        # TODO: like with cells, we should only be replacing the
-        # values in our bindings.
-        self.outer_globals = caller.f_globals
-
-        # can't use a LayeredDict for globals -- it only accepts pure
-        # dict instances apparently.
-
-        # TODO: this is likely buggy. We need to properly fetch our
-        # values back out from globals when we pop the stack, so that
-        # we can re-apply.
-        self.inner_globals = dict(self.outer_globals)
         self.inner_globals.update(self.defined)
 
         frame_setglobals(caller, self.inner_globals)
