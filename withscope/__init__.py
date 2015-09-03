@@ -37,42 +37,42 @@ class LayeredDict(dict):
     otherwise fall-through to read/write values from a baseline dict.
     """
 
-    def __init__(self, baseline, *args, **kwds):
+    def __init__(self, baseline, defined):
         self.baseline = baseline
-        dict.__init__(self, *args, **kwds)
+        self.defined = defined
 
     def __getitem__(self, key):
-        if dict.__contains__(self, key):
-            return dict.__getitem__(self, key)
+        if key in self.defined:
+            return self.defined[key]
         else:
             return self.baseline[key]
 
     def __setitem__(self, key, value):
         #print "setting item %r in %08x to %r" % (key, id(self), value)
-
-        if dict.__contains__(self, key):
-            dict.__setitem__(self, key, value)
+        if key in self.defined:
+            self.defined[key] = value
         else:
             self.baseline[key] = value
 
     def __delitem__(self, key):
-        if dict.__contains__(self, key):
-            dict.__delitem__(self, key)
+        #print "delitem %08x %r" % (id(self), key)
+        if key in self.defined:
+            del self.defined[key]
         else:
-            self.baseline.__delitem__(key)
+            del self.baseline[key]
 
     def __iter__(self):
         for key in self.baseline:
-            if not dict.__contains__(self, key):
+            if key not in self.defined:
                 yield key
-        for key in dict.__iter__(self):
+        for key in self.defined:
             yield key
 
     def __len__(self):
         return len(iter(self))
 
     def __contains__(self, key):
-        return dict.__contains__(self, key) or key in self.baseline
+        return key in self.defined or key in self.baseline
 
     iterkeys = __iter__
 
@@ -81,13 +81,13 @@ class LayeredDict(dict):
 
     def iteritems(self):
         for key, value in self.baseline.iteritems():
-            if not dict.__contains__(self, key):
+            if key not in self.defined:
                 yield key, value
-        for key, value in dict.iteritems(self):
+        for key, value in self.defined.iteritems():
             yield key, value
 
     def items(self):
-        return list(iteritems(self))
+        return list(self.iteritems())
 
     def itervalues(self):
         return (value for key,value in self.iteritems())
@@ -96,7 +96,7 @@ class LayeredDict(dict):
         return list(self.itervalues())
 
     def __repr__(self):
-        return "{%s + %r}" % (dict.__repr__(self), self.baseline)
+        return "{%r + %r}" % (self.defined, self.baseline)
 
     def get(self, key, defaultval=None):
         try:
@@ -112,6 +112,7 @@ class LayeredDict(dict):
 
 
 class Scope(object):
+
     """
     A lexical scope, activated and revoked via the python managed
     interface methods (the `with` keyword).
@@ -123,12 +124,12 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
-        self.outer_locals = None
-        self.outer_globals = None
-        self.outer_cells = None
-        self.inner_locals = None
-        self.inner_globals = None
-        self.inner_cells = None
+        self._outer_locals = None
+        self._outer_globals = None
+        self._outer_cells = None
+        self._inner_locals = None
+        self._inner_globals = None
+        self._inner_cells = None
 
         self.defined = dict(*args, **kwds)
 
@@ -144,42 +145,42 @@ class Scope(object):
         caller = currentframe().f_back
 
         # store our existing cells, then recreate them
-        self.outer_cells = frame_getcells(caller)
-        if self.inner_cells is None:
+        self._outer_cells = frame_getcells(caller)
+        if self._inner_cells is None:
             # TODO: we should only really be doing this for the cells
             # in our bindings. Need to update the recreatecells call
             # so that it accepts the defined dict and will only
             # recreate a cell bound to a defined name.
             frame_recreatecells(caller)
-            self.inner_cells = frame_getcells(caller)
+            self._inner_cells = frame_getcells(caller)
         else:
-            frame_setcells(caller, self.inner_cells)
+            frame_setcells(caller, self._inner_cells)
 
         # store the existing locals, then create a layer atop that and
         # swap into place.
-        self.outer_locals = caller.f_locals
-        if self.inner_locals is None:
-            self.inner_locals = LayeredDict(self.outer_locals, self.defined)
+        self._outer_locals = caller.f_locals
+        if self._inner_locals is None:
+            self._inner_locals = LayeredDict(self._outer_locals, self.defined)
         else:
-            self.inner_locals.baseline = self.outer_locals
-        frame_setlocals(caller, self.inner_locals)
+            self._inner_locals.baseline = self._outer_locals
+        frame_setlocals(caller, self._inner_locals)
 
-        self.outer_globals = caller.f_globals
+        self._outer_globals = caller.f_globals
 
         # can't use a LayeredDict for globals -- it only accepts pure
         # dict instances apparently. This is fine, since any
         # assignment would actually cause a write to locals rather
         # than globals, we only need globals in place to find
         # variables not already defined via normal syntax.
-        self.inner_globals = dict(self.outer_globals)
+        self._inner_globals = dict(self._outer_globals)
 
         # todo: create a smaller defined set, of ONLY those defined
         # names which aren't in the frame's locals already -- we're
         # going to pretend they are global values for the duration of
         # the scope
-        self.inner_globals.update(self.defined)
+        self._inner_globals.update(self.defined)
 
-        frame_setglobals(caller, self.inner_globals)
+        frame_setglobals(caller, self._inner_globals)
 
         return self
 
@@ -197,13 +198,13 @@ class Scope(object):
                         # them, allowing outer scope references to be
                         # preserved and not incorrectly rewritten
 
-        frame_setcells(caller, self.outer_cells)
-        frame_setlocals(caller, self.outer_locals)
-        frame_setglobals(caller, self.outer_globals)
+        frame_setcells(caller, self._outer_cells)
+        frame_setlocals(caller, self._outer_locals)
+        frame_setglobals(caller, self._outer_globals)
 
-        self.outer_cells = None
-        self.outer_locals = None
-        self.outer_globals = None
+        self._outer_cells = None
+        self._outer_locals = None
+        self._outer_globals = None
 
         return exc_type is None
 

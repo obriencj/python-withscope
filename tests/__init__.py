@@ -149,5 +149,21 @@ class LetTest(TestCase):
             self.assertEquals(b[0], "fajita")
 
 
+    def _test_del(self):
+
+        a = "taco"
+        with let(a="pizza") as scope:
+            self.assertEquals(a, "pizza")
+
+            # TODO: figure out what del is actually doing, because
+            # it's not just tweaking locals and then calling
+            # LocalsToFast, apparently.
+
+            #del a
+            #self.assertEquals(a, "taco")
+
+        self.assertEquals(a, "taco")
+
+
 #
 # The end.
