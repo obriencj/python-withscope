@@ -124,6 +124,10 @@ grab the current frame and swap its `f_back` out, this time for the
 original return frame, but with an updated code index. Pretty sure
 that will work, anyway.
 
+I am also strongly considering re-implementing `LayeredMapping`
+natively, just because it's probably the slowest part of this whole
+thing, and it makes for ugly-to-read Python.
+
 
 ## Requirements
 
