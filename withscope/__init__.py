@@ -27,8 +27,11 @@ __all__ = ( "let", )
 
 
 from inspect import currentframe
-from ._frame import frame_setlocals, frame_setglobals, \
-    frame_recreatecells, frame_setcells, frame_getcells
+
+from ._frame import frame_clone, frame_swap_cells, \
+    frame_set_f_lasti, frame_set_f_back, \
+    frame_set_f_locals, frame_set_f_globals, \
+    frame_clear_f_executing
 
 
 class LayeredMapping(object):
@@ -112,6 +115,14 @@ class LayeredMapping(object):
         return self is other
 
 
+class ScopeInUse(Exception):
+    """
+    Raised when an already in-use scope is called to activate itself
+    again.
+    """
+    pass
+
+
 class Scope(object):
 
     """
@@ -125,14 +136,36 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
-        self._outer_locals = None
-        self._outer_globals = None
-        self._outer_cells = None
-        self._inner_locals = None
-        self._inner_globals = None
-        self._inner_cells = None
-
         self.defined = dict(*args, **kwds)
+
+        # create cells for all our values. They may or may not all get
+        # used, depending on the variety of frames we get called from
+        # within.
+        self._cells = dict((key, _cell(val)) for key,val
+                           in self.defined.iteritems())
+
+        # our original parent frame upon entry. Also used as a
+        # sentinel to determine if we're already in-use as a lexical
+        # scope.
+        self._outer_caller = None
+
+        # our duplicated parent frame, representing our scope
+        self._inner_caller = None
+
+
+    def alias(self):
+        """
+        Create an alias scope that can be entered while the original is
+        still active. References the same defined values and cells, but
+        is otherwise a separate instance.
+        """
+
+        dup = self.__new__(type(self))
+        dup.defined = self.defined
+        dup._cells = self._cells
+        dup._outer_caller = None
+        dup._inner_caller = None
+        return dup
 
 
     def __enter__(self):
@@ -143,46 +176,52 @@ class Scope(object):
 
         #print "__enter__ for %08x" % id(self)
 
-        caller = currentframe().f_back
+        if self._outer_caller is not None:
+            raise ScopeInUse(self)
 
-        # store our existing cells, then recreate them
-        self._outer_cells = frame_getcells(caller)
-        if self._inner_cells is None:
-            # TODO: we should only really be doing this for the cells
-            # in our bindings. Need to update the recreatecells call
-            # so that it accepts the defined dict and will only
-            # recreate a cell bound to a defined name.
-            frame_recreatecells(caller)
-            self._inner_cells = frame_getcells(caller)
-        else:
-            frame_setcells(caller, self._inner_cells)
+        assert(self._outer_caller is None)
+        assert(self._inner_caller is None)
+
+        current = currentframe()
+
+        # we'll duplicate our calling frame, and then modify the
+        # current frame to return to our specialty duplicate
+        # instead. We'll perform similar hackery in the __exit__
+        # method so that when the scope ends, we properly return to
+        # the original caller and execution can continue as planned.
+        caller = current.f_back
+        dup_caller = frame_duplicate(caller, inner_globals, inner_locals)
+
+        self._outer_caller = caller
+        self._inner_caller = dup_caller
+
+        # search through the cells in our duplicate frame and if they
+        # are named after any in our cell set, swap them. Note we'll
+        # be discarding the dup frame at the end of scope, so no
+        # worries.
+        frame_swap_cells(dup_caller, self._cells)
 
         # store the existing locals, then create a layer atop that and
         # swap into place.
-        self._outer_locals = caller.f_locals
-        if self._inner_locals is None:
-            layered = LayeredMapping(self._outer_locals, self.defined)
-            self._inner_locals = layered
-        else:
-            self._inner_locals.baseline = self._outer_locals
-        frame_setlocals(caller, self._inner_locals)
-
-        self._outer_globals = caller.f_globals
+        outer_locals = caller.f_locals
+        inner_locals = LayeredMapping(self._outer_locals, self.defined)
+        frame_set_f_locals(caller, self._inner_locals)
 
         # can't use a LayeredDict for globals -- it only accepts pure
         # dict instances apparently. This is fine, since any
         # assignment would actually cause a write to locals rather
         # than globals, we only need globals in place to find
         # variables not already defined via normal syntax.
-        self._inner_globals = dict(self._outer_globals)
-
-        # todo: create a smaller defined set, of ONLY those defined
-        # names which aren't in the frame's locals already -- we're
+        inner_globals = dict(caller.f_globals)
+        inner_globals.update(self.defined)
+        frame_set_f_globals(dup_caller, inner_globals)
+        # TODO: create a smaller subset of defined using ONLY those
+        # keys which aren't in the frame's locals already -- we're
         # going to pretend they are global values for the duration of
         # the scope
-        self._inner_globals.update(self.defined)
 
-        frame_setglobals(caller, self._inner_globals)
+        # we will now return to our duplicated caller
+        frame_set_f_back(current, dup_caller)
 
         return self
 
@@ -194,19 +233,29 @@ class Scope(object):
 
         #print "__exit__ for %08x" % id(self)
 
-        caller = currentframe().f_back
-        caller.f_locals # this triggers copying the fast locals into
-                        # the current locals dict, before we reset
-                        # them, allowing outer scope references to be
-                        # preserved and not incorrectly rewritten
+        current = currentframe()
+        assert(self._inner_caller is current.f_back)
 
-        frame_setcells(caller, self._outer_cells)
-        frame_setlocals(caller, self._outer_locals)
-        frame_setglobals(caller, self._outer_globals)
+        # f_locals is a dynamic attribute. This triggers copying the
+        # fast locals into the current locals dict, before we reset
+        # them, allowing outer scope references to be preserved and
+        # not incorrectly rewritten
+        self._inner_caller.f_locals
 
-        self._outer_cells = None
-        self._outer_locals = None
-        self._outer_globals = None
+        code_index = self._inner_caller.f_lasti
+        frame_set_f_lasti(self._outer_caller, code_index)
+
+        # we will now be able to return execution to our original
+        # caller frame, captured during __enter__
+        frame_set_f_back(current, self._outer_caller)
+
+        # now that f_back is set to the original frame, the dup frame
+        # can be marked as no longer in service, and cleaned up.
+        frame_clear_f_executing(self._inner_caller)
+        self._inner_caller.clear()
+
+        self._inner_caller = None
+        self._outer_caller = None
 
         return exc_type is None
 

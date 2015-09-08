@@ -34,11 +34,104 @@
 #include <tupleobject.h>
 
 
+static PyObject *cell_from_value(PyObject *self, PyObject *args) {
+  PyObject *val = NULL;
+
+  if (! PyArg_ParseTuple(args, "O", &val))
+    return NULL;
+
+  return PyCell_New(val);
+}
+
+
+#define COPYFIELD(FROM_OBJ, TO_OBJ, FIELD) { \
+    TO_OBJ -> FIELD = FROM_OBJ -> FIELD; \
+    Py_INCREF(TO_OBJ -> FIELD); \
+  }
+
+
+static PyObject *frame_duplicate(PyObject *self, PyObject *args) {
+  PyFrameObject *orig = NULL;
+  PyFrameObject *dupl = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!", &PyFrame_Type, &orig))
+    return NULL;
+
+  PyCodeObject *code = orig->f_code;
+  extras = (code->co_stacksize + code->co_nlocals +
+	    ncells + nfrees);
+
+  dupl = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, extras);
+
+  COPYFIELD(orig, dupl, f_back);
+  COPYFIELD(orig, dupl, f_code);
+  COPYFIELD(orig, dupl, f_builtins);
+  COPYFIELD(orig, dupl, f_globals);
+  COPYFIELD(orig, dupl, f_locals);
+  COPYFIELD(orig, dupl, f_trace);
+  COPYFIELD(orig, dupl, f_exc_type);
+  COPYFIELD(orig, dupl, f_exc_value);
+  COPYFIELD(orig, dupl, f_exc_traceback);
+  //COPYFIELD(orig, dupl, f_gen);
+
+  dupl->f_valuestack = orig->f_valuestack;
+  dupl->f_stackstop = orig->f_stackstop;
+  dupl->f_gen = orig->f_gen;
+  dupl->f_lasti = orig->f_lasti;
+  dupl->f_lineno = orig->f_lineno;
+  dupl->f_iblock = orig->f_iblock;
+  dupl->f_executing = orig->f_executing;
+
+  int j = extras;
+  while(j--) {
+    COPYFIELD(orig, dupl, f_localsplus[j]);
+  }
+
+  return dupl;
+}
+
+
+/**
+   Sets the execution offset
+ */
+static PyObject *frame_set_f_lasti(PyObject *self, PyObject *args) {
+  PyFrameObject *frame = NULL;
+  int val = 0;
+
+  if (! PyArg_ParseTuple(args, "O!i", &PyFrame_Type, &frame, &val))
+    return NULL;
+
+  frame->last_i = val;
+
+  Py_RETURN_NONE;
+}
+
+
+/**
+   Sets the parent frame
+ */
+static PyObject *frame_set_f_back(PyObject *self, PyObject *args) {
+  PyFrameObject *frame = NULL;
+  PyFrameObject *back = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!O!", &PyFrame_Type, &frame,
+			 &PyFrame_Type, &back))
+    return NULL;
+
+  PyObject *old_back = frame->f_back;
+  frame->f_back = back;
+  Py_INCREF(back);
+  Py_DECREF(old_back);
+
+  Py_RETURN_NONE;
+}
+
+
 /**
    Sets the locals dict for a call frame, and refreshes the fast
    access vars from that dict.
  */
-static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
+static PyObject *frame_set_locals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
 
@@ -59,7 +152,7 @@ static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
 /**
    Sets the globals dict for a call frame
  */
-static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
+static PyObject *frame_set_globals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
 
@@ -72,6 +165,62 @@ static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
   Py_DECREF(old_globals);
 
   Py_RETURN_NONE;
+}
+
+
+/**
+   Sets the executing bool for a call frame
+ */
+static PyObject *frame_clear_f_executing(PyObject *self, PyObject *args) {
+  PyFrameObject *frame = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!", &PyFrame_Type, &frame))
+    return NULL;
+
+  frame->f_executing = 0;
+
+  Py_RETURN_NONE;
+}
+
+
+static PyObject *frame_swap_cells(PyObject *self, PyObject *args) {
+  PyFrameObject *frame = NULL;
+  PyObject *scopecells = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!O", &PyFrame_Type, &frame,
+			 &scopecells))
+    return NULL;
+
+  PyCodeObject *code = frame->f_code;
+  PyObject **fast = frame->f_localsplus;
+  int ncells, nfreevars;
+  PyObject *key, *newcell, *oldcell;
+
+  offset = code->co_nlocals;
+  ncells = PyTuple_GET_SIZE(code->co_cellvars);
+
+  for (j = ncells; j--; ) {
+    key = PyTuple_GET_ITEM(code->co_cellvars, j);
+    newcell = PyObject_GetItem(scopecells, key);
+    if (newcell) {
+      oldcell = fast[j + offset];
+      fast[j + offset] = newcell;
+      Py_DECREF(oldcell);
+    }
+  }
+
+  offset += ncells;
+  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
+
+  for (j = nfreevars; j--; ) {
+    key = PyTuple_GET_ITEM(code->co_freevars, j);
+    newcell = PyObject_GetItem(scopecells, key);
+    if (newcell) {
+      oldcell = fast[j + offset];
+      fast[j + offset] = newcell;
+      Py_DECREF(oldcell);
+    }
+  }
 }
 
 
@@ -92,8 +241,8 @@ static PyObject *frame_recreatecells(PyObject *self, PyObject *args) {
   PyObject *oldcell;
 
   offset = code->co_nlocals;
-
   ncells = PyTuple_GET_SIZE(code->co_cellvars);
+
   for (j = ncells; j--; ) {
     oldcell = fast[j + offset];
     fast[j + offset] = PyCell_New(PyCell_Get(oldcell));
@@ -101,8 +250,8 @@ static PyObject *frame_recreatecells(PyObject *self, PyObject *args) {
   }
 
   offset += ncells;
-
   nfreevars = PyTuple_GET_SIZE(code->co_freevars);
+
   for (j = nfreevars; j--; ) {
     oldcell = fast[j + offset];
     fast[j + offset] = PyCell_New(PyCell_Get(oldcell));
@@ -202,11 +351,29 @@ static PyObject *frame_setcells(PyObject *self, PyObject *args) {
 
 static PyMethodDef methods[] = {
 
-  { "frame_setlocals", frame_setlocals, METH_VARARGS,
-    "set a frame's locals" },
+  { "cell_from_value", cell_from_value, METH_VARARGS,
+    "create a cell wrapping a value" },
 
-  { "frame_setglobals", frame_setglobals, METH_VARARGS,
-    "set a frame's globals" },
+  { "frame_clone", frame_clone, METH_VARARGS,
+    "clone a frame" },
+
+  { "frame_swap_cells", frame_swap_cells, METH_VARARGS,
+    "swap fast cells in a frame with matching cells from a dict" },
+
+  { "frame_set_f_lasti", frame_set_f_lasti, METH_VARARGS,
+    "set the f_lasi attribute of a frame" },
+
+  { "frame_set_f_back", frame_set_f_back, METH_VARARGS,
+    "set the f_back attribute of a frame" },
+
+  { "frame_set_f_locals", frame_setlocals, METH_VARARGS,
+    "set the f_locals attribute of a frame" },
+
+  { "frame_set_f_globals", frame_setglobals, METH_VARARGS,
+    "set a f_globals attribute of a frame" },
+
+  { "frame_clear_f_executing", frame_clear_f_executing, METH_VARARGS,
+    "set the f_executing attribute of a frame to false" },
 
   { "frame_recreatecells", frame_recreatecells, METH_VARARGS,
     "recreate a frame's cells with the same values" },
