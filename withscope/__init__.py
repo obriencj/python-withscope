@@ -23,7 +23,7 @@ this.
 """
 
 
-__all__ = ( "let", "ScopeException" )
+__all__ = ( "let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch" )
 
 
 from inspect import currentframe
@@ -32,6 +32,28 @@ from ._frame import cell_from_value, frame_swap_fast_cells, \
 
 
 class ScopeException(Exception):
+    """
+    Base class for the ScopeInUse and ScopeMismatch errors.
+    """
+    pass
+
+
+class ScopeInUse(ScopeException):
+    """
+    raised when a Scope is entered while already
+    active. `Scope.alias()` can be used to create a duplicate Scope
+    which can be re-used while the original was stil in use
+    """
+    pass
+
+
+class ScopeMismatch(ScopeException):
+    """
+    raised when a Scope is exited and the parent frame does not match
+    with the parent frame when entered. In general this is only
+    possible if someone were to manually call the __enter__/__exit__
+    method of the Scope, incorrectly.
+    """
     pass
 
 
@@ -45,47 +67,57 @@ class LayeredMapping(object):
     def __init__(self, baseline, defined):
         self.baseline = baseline
         self.defined = defined
-        self.defkeys = set(defined.iterkeys())
+        self._defkeys = set(defined.iterkeys())
+
 
     def __getitem__(self, key):
         # no fall-through if it was originally defined but deleted
-        if key in self.defkeys:
+        if key in self._defkeys:
             return self.defined[key]
         else:
             return self.baseline[key]
 
+
     def __setitem__(self, key, value):
         #print "setting item %r in %08x to %r" % (key, id(self), value)
-        if key in self.defkeys:
+        if key in self._defkeys:
             self.defined[key] = value
         else:
             self.baseline[key] = value
 
+
     def __delitem__(self, key):
         #print "delitem %08x %r" % (id(self), key)
-        if key in self.defkeys:
+        if key in self._defkeys:
             del self.defined[key]
         else:
             del self.baseline[key]
 
+
     def __iter__(self):
         for key in self.baseline:
-            if key not in self.defkeys:
+            if key not in self._defkeys:
                 yield key
         for key in self.defined:
             yield key
 
+
     def __len__(self):
         return len(iter(self))
 
+
     def __contains__(self, key):
         return (key in self.defined or
-                (key in self.baseline and key not in self.defkeys))
+                (key in self.baseline and
+                 key not in self._defkeys))
+
 
     iterkeys = __iter__
 
+
     def keys(self):
         return list(self.iterkeys())
+
 
     def iteritems(self):
         for key, value in self.baseline.iteritems():
@@ -94,17 +126,22 @@ class LayeredMapping(object):
         for key, value in self.defined.iteritems():
             yield key, value
 
+
     def items(self):
         return list(self.iteritems())
+
 
     def itervalues(self):
         return (value for key,value in self.iteritems())
 
+
     def values(self):
         return list(self.itervalues())
 
+
     def __repr__(self):
         return "{%r + %r}" % (self.baseline, self.defined)
+
 
     def get(self, key, defaultval=None):
         try:
@@ -112,15 +149,16 @@ class LayeredMapping(object):
         except KeyError:
             return defaultval
 
+
     def __ne__(self, other):
         return not self.__eq__(other)
+
 
     def __eq__(self, other):
         return self is other
 
 
 class Scope(object):
-
     """
     A lexical scope, activated and revoked via the python managed
     interface methods (the `with` keyword).
@@ -132,7 +170,10 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
+        # borrow the scope params as if they
         self._defined = dict(*args, **kwds)
+
+        #
         self._cells = dict((key, cell_from_value(val)) for
                            key, val in self._defined.iteritems())
 
@@ -204,7 +245,7 @@ class Scope(object):
         #print "__enter__ for %08x" % id(self)
 
         if self._outer_frame:
-            raise ScopeException("scope in use")
+            raise ScopeInUse()
 
         caller = currentframe().f_back
         self._outer_frame = caller
@@ -238,7 +279,7 @@ class Scope(object):
         caller = currentframe().f_back
 
         if self._outer_frame is not caller:
-            raise ScopeException("scope exiting from different frame")
+            raise ScopeMismatch()
 
         # this triggers copying the fast locals into the current
         # locals dict, before we reset them, allowing outer scope
