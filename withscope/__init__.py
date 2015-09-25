@@ -23,12 +23,16 @@ this.
 """
 
 
-__all__ = ( "let", )
+__all__ = ( "let", "ScopeException" )
 
 
 from inspect import currentframe
-from ._frame import frame_setlocals, frame_setglobals, \
-    frame_recreatecells, frame_setcells, frame_getcells
+from ._frame import cell_from_value, frame_swap_fast_cells, \
+    frame_set_f_locals, frame_set_f_globals
+
+
+class ScopeException(Exception):
+    pass
 
 
 class LayeredMapping(object):
@@ -41,30 +45,32 @@ class LayeredMapping(object):
     def __init__(self, baseline, defined):
         self.baseline = baseline
         self.defined = defined
+        self.defkeys = set(defined.iterkeys())
 
     def __getitem__(self, key):
-        if key in self.defined:
+        # no fall-through if it was originally defined but deleted
+        if key in self.defkeys:
             return self.defined[key]
         else:
             return self.baseline[key]
 
     def __setitem__(self, key, value):
         #print "setting item %r in %08x to %r" % (key, id(self), value)
-        if key in self.defined:
+        if key in self.defkeys:
             self.defined[key] = value
         else:
             self.baseline[key] = value
 
     def __delitem__(self, key):
         #print "delitem %08x %r" % (id(self), key)
-        if key in self.defined:
+        if key in self.defkeys:
             del self.defined[key]
         else:
             del self.baseline[key]
 
     def __iter__(self):
         for key in self.baseline:
-            if key not in self.defined:
+            if key not in self.defkeys:
                 yield key
         for key in self.defined:
             yield key
@@ -73,7 +79,8 @@ class LayeredMapping(object):
         return len(iter(self))
 
     def __contains__(self, key):
-        return key in self.defined or key in self.baseline
+        return (key in self.defined or
+                (key in self.baseline and key not in self.defkeys))
 
     iterkeys = __iter__
 
@@ -82,7 +89,7 @@ class LayeredMapping(object):
 
     def iteritems(self):
         for key, value in self.baseline.iteritems():
-            if key not in self.defined:
+            if key not in self.defkeys:
                 yield key, value
         for key, value in self.defined.iteritems():
             yield key, value
@@ -97,7 +104,7 @@ class LayeredMapping(object):
         return list(self.itervalues())
 
     def __repr__(self):
-        return "{%r + %r}" % (self.defined, self.baseline)
+        return "{%r + %r}" % (self.baseline, self.defined)
 
     def get(self, key, defaultval=None):
         try:
@@ -125,14 +132,67 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
+        self._defined = dict(*args, **kwds)
+        self._cells = dict((key, cell_from_value(val)) for
+                           key, val in self._defined.iteritems())
+
+        # this is the state we gather at __enter__ and need to restore
+        # at __exit__
+        self._outer_frame = None
         self._outer_locals = None
         self._outer_globals = None
         self._outer_cells = None
         self._inner_locals = None
         self._inner_globals = None
-        self._inner_cells = None
 
-        self.defined = dict(*args, **kwds)
+
+    def alias(self):
+        """
+        Create an alias scope that can be entered while the original is
+        still active. References the same defined values and cells, but
+        is otherwise a separate instance.
+        """
+
+        dup = self.__new__(type(self))
+        dup._defined = self.defined
+        dup._cells = self._cells
+
+        dup._outer_frame = None
+        dup._outer_locals = None
+        dup._outer_globals = None
+        dup._outer_cells = None
+        dup._inner_locals = None
+        dup._inner_globals = None
+
+        return dup
+
+
+    def __getitem__(self, key):
+        return self._defined[key]
+
+
+    def __setitem__(self, key, value):
+        self._defined[key] = value
+
+
+    def __contains__(self, key):
+        return key in self._defined
+
+
+    def __delitem__(self, key):
+        del self._defined[key]
+
+
+    def iteritems(self):
+        return self._defined.iteritems()
+
+
+    def items(self):
+        return self._defined.items()
+
+
+    def __iter__(self):
+        return iter(self._defined)
 
 
     def __enter__(self):
@@ -143,46 +203,27 @@ class Scope(object):
 
         #print "__enter__ for %08x" % id(self)
 
+        if self._outer_frame:
+            raise ScopeException("scope in use")
+
         caller = currentframe().f_back
-
-        # store our existing cells, then recreate them
-        self._outer_cells = frame_getcells(caller)
-        if self._inner_cells is None:
-            # TODO: we should only really be doing this for the cells
-            # in our bindings. Need to update the recreatecells call
-            # so that it accepts the defined dict and will only
-            # recreate a cell bound to a defined name.
-            frame_recreatecells(caller)
-            self._inner_cells = frame_getcells(caller)
-        else:
-            frame_setcells(caller, self._inner_cells)
-
-        # store the existing locals, then create a layer atop that and
-        # swap into place.
+        self._outer_frame = caller
         self._outer_locals = caller.f_locals
-        if self._inner_locals is None:
-            layered = LayeredMapping(self._outer_locals, self.defined)
-            self._inner_locals = layered
-        else:
-            self._inner_locals.baseline = self._outer_locals
-        frame_setlocals(caller, self._inner_locals)
-
         self._outer_globals = caller.f_globals
 
-        # can't use a LayeredDict for globals -- it only accepts pure
-        # dict instances apparently. This is fine, since any
-        # assignment would actually cause a write to locals rather
-        # than globals, we only need globals in place to find
-        # variables not already defined via normal syntax.
-        self._inner_globals = dict(self._outer_globals)
+        # make sure to do this after observing f_locals, since
+        # fetching f_locals has the side-effect of mucking with cell
+        # values.
+        self._outer_cells = frame_swap_fast_cells(caller, self._cells)
 
-        # todo: create a smaller defined set, of ONLY those defined
-        # names which aren't in the frame's locals already -- we're
-        # going to pretend they are global values for the duration of
-        # the scope
-        self._inner_globals.update(self.defined)
+        inner_locals = LayeredMapping(self._outer_locals, self._defined)
+        frame_set_f_locals(caller, inner_locals)
+        self._inner_locals = inner_locals
 
-        frame_setglobals(caller, self._inner_globals)
+        inner_globals = dict(self._outer_globals)
+        inner_globals.update(self._defined)
+        frame_set_f_globals(caller, inner_globals)
+        self._inner_globals = inner_globals
 
         return self
 
@@ -195,18 +236,31 @@ class Scope(object):
         #print "__exit__ for %08x" % id(self)
 
         caller = currentframe().f_back
-        caller.f_locals # this triggers copying the fast locals into
-                        # the current locals dict, before we reset
-                        # them, allowing outer scope references to be
-                        # preserved and not incorrectly rewritten
 
-        frame_setcells(caller, self._outer_cells)
-        frame_setlocals(caller, self._outer_locals)
-        frame_setglobals(caller, self._outer_globals)
+        if self._outer_frame is not caller:
+            raise ScopeException("scope exiting from different frame")
 
+        # this triggers copying the fast locals into the current
+        # locals dict, before we reset them, allowing outer scope
+        # references to be preserved and not incorrectly rewritten
+        caller.f_locals
+
+        # put our original cells back
+        frame_swap_fast_cells(caller, self._outer_cells)
+
+        # put our locals back, which has the side-effect of syncing
+        # the cell values
+        frame_set_f_locals(caller, self._outer_locals)
+
+        frame_set_f_globals(caller, self._outer_globals)
+
+        self._outer_frame = None
         self._outer_cells = None
         self._outer_locals = None
         self._outer_globals = None
+
+        self._inner_locals = None
+        self._inner_globals = None
 
         return exc_type is None
 

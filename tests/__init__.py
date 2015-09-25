@@ -149,20 +149,53 @@ class LetTest(TestCase):
             self.assertEquals(b[0], "fajita")
 
 
-    def _test_del(self):
-
+    def test_del_fast_local(self):
         a = "taco"
+
+        # testing `DELETE_NAME` opcode. Since `a` is already defined
+        # above when we push our scope `a` will be considered a fast
+        # local, and calling `del a` will trigger `DELETE_NAME`
         with let(a="pizza") as scope:
             self.assertEquals(a, "pizza")
+            del a
 
-            # TODO: figure out what del is actually doing, because
-            # it's not just tweaking locals and then calling
-            # LocalsToFast, apparently.
-
-            #del a
+            # this doesn't work -- I cannot make it fall-through,
+            # there's nothing that lets me catch the DELETE_NAME
+            # opcode's execution, and the f_locals.__delitem__ is
+            # only triggered when the locals() builtin is called
             #self.assertEquals(a, "taco")
 
+            self.assertTrue("a" not in locals())
+
         self.assertEquals(a, "taco")
+
+        with scope:
+            self.assertEquals(a, "taco")
+
+        #print locals()
+        self.assertEquals(a, "taco")
+
+
+    def test_del_global(self):
+        # testing `DELETE_GLOBAL` opcode. Since `b` is NOT already
+        # defined when we push our scope, AND since `b` is not
+        # ASSIGNED to anything in our block below, `b` will be
+        # injected as a global -- read-only from our perspective,
+        # because if the compiler had detected a write, it would have
+        # made it into fast locals. This explanation is awful, rewrite
+        # it.
+
+        self.assertTrue("a" not in locals())
+        self.assertTrue("a" not in globals())
+
+        with let(a="pizza") as scope:
+            self.assertEquals(a, "pizza")
+            del a
+
+            self.assertTrue("a" not in locals())
+
+        self.assertTrue("a" not in locals())
+        self.assertTrue("a" not in globals())
 
 
 #

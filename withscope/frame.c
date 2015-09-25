@@ -31,14 +31,23 @@
 #include <Python.h>
 #include <cellobject.h>
 #include <frameobject.h>
-#include <tupleobject.h>
+
+
+static PyObject *cell_from_value(PyObject *self, PyObject *args) {
+  PyObject *val = NULL;
+
+  if (! PyArg_ParseTuple(args, "O", &val))
+    return NULL;
+
+  return PyCell_New(val);
+}
 
 
 /**
    Sets the locals dict for a call frame, and refreshes the fast
    access vars from that dict.
  */
-static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
+static PyObject *frame_set_f_locals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
 
@@ -59,7 +68,7 @@ static PyObject *frame_setlocals(PyObject *self, PyObject *args) {
 /**
    Sets the globals dict for a call frame
  */
-static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
+static PyObject *frame_set_f_globals(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *val = NULL;
 
@@ -75,147 +84,70 @@ static PyObject *frame_setglobals(PyObject *self, PyObject *args) {
 }
 
 
-/**
-   Goes over the cells in a call frame and duplicates them, swapping
-   the new cells into the old cell's place.
- */
-static PyObject *frame_recreatecells(PyObject *self, PyObject *args) {
+static PyObject *frame_swap_fast_cells(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
+  PyObject *scopecells = NULL;
 
-  if (! PyArg_ParseTuple(args, "O!", &PyFrame_Type, &frame))
+  if (! PyArg_ParseTuple(args, "O!O", &PyFrame_Type, &frame,
+			 &scopecells))
     return NULL;
 
   PyCodeObject *code = frame->f_code;
   PyObject **fast = frame->f_localsplus;
-  Py_ssize_t j, offset;
-  int ncells, nfreevars;
-  PyObject *oldcell;
+  int j, offset, ncells, nfreevars;
+  PyObject *key, *newcell, *oldcell;
+
+  PyObject *swapped = PyDict_New();
 
   offset = code->co_nlocals;
-
   ncells = PyTuple_GET_SIZE(code->co_cellvars);
+
   for (j = ncells; j--; ) {
-    oldcell = fast[j + offset];
-    fast[j + offset] = PyCell_New(PyCell_Get(oldcell));
-    Py_DECREF(oldcell);
+    key = PyTuple_GET_ITEM(code->co_cellvars, j);
+    newcell = PyObject_GetItem(scopecells, key);
+    if (newcell) {
+      oldcell = fast[j + offset];
+      fast[j + offset] = newcell;
+      if (oldcell) {
+	PyDict_SetItem(swapped, key, oldcell);
+	Py_DECREF(oldcell);
+      }
+    }
   }
 
   offset += ncells;
-
-  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
-  for (j = nfreevars; j--; ) {
-    oldcell = fast[j + offset];
-    fast[j + offset] = PyCell_New(PyCell_Get(oldcell));
-    Py_DECREF(oldcell);
-  }
-
-  Py_RETURN_NONE;
-}
-
-
-/**
-   Collect the cells from fast locals in a call frame as a new
-   tuple. The order is compatible with frame_setcells.
- */
-static PyObject *frame_getcells(PyObject *self, PyObject *args) {
-  PyFrameObject *frame = NULL;
-  PyObject *cells = NULL;
-
-  if (! PyArg_ParseTuple(args, "O!", &PyFrame_Type, &frame))
-    return NULL;
-
-  PyCodeObject *code = frame->f_code;
-  PyObject **fast = frame->f_localsplus;
-  Py_ssize_t j, offset, index = 0;
-  PyObject *oldcell;
-  int ncells, nfreevars;
-
-  ncells = PyTuple_GET_SIZE(code->co_cellvars);
   nfreevars = PyTuple_GET_SIZE(code->co_freevars);
 
-  cells = PyTuple_New(ncells + nfreevars);
-
-  offset = code->co_nlocals;
-  for (j = ncells; j--; ) {
-    oldcell = fast[j + offset];
-    Py_INCREF(oldcell);
-    PyTuple_SET_ITEM(cells, index++, oldcell);
-  }
-
-  offset += ncells;
   for (j = nfreevars; j--; ) {
-    oldcell = fast[j + offset];
-    Py_INCREF(oldcell);
-    PyTuple_SET_ITEM(cells, index++, oldcell);
+    key = PyTuple_GET_ITEM(code->co_freevars, j);
+    newcell = PyObject_GetItem(scopecells, key);
+    if (newcell) {
+      oldcell = fast[j + offset];
+      fast[j + offset] = newcell;
+      if (oldcell) {
+	PyDict_SetItem(swapped, key, oldcell);
+	Py_DECREF(oldcell);
+      }
+    }
   }
 
-  return cells;
-}
-
-
-/**
-   Replace the cells in a call frame's fast locals with those from a
-   tuple. The order should be the same as from frame_getcells.
- */
-static PyObject *frame_setcells(PyObject *self, PyObject *args) {
-  PyFrameObject *frame = NULL;
-  PyObject *cells = NULL;
-
-  if (! PyArg_ParseTuple(args, "O!O!", &PyFrame_Type, &frame,
-			 &PyTuple_Type, &cells))
-    return NULL;
-
-  PyCodeObject *code = frame->f_code;
-  PyObject **fast = frame->f_localsplus;
-  Py_ssize_t j, offset, index = 0;
-  PyObject *oldcell, *newcell;
-  int ncells, nfreevars;
-
-  offset = code->co_nlocals;
-
-  /* note, the order of the frame_setcells needs to be the same wonky
-     order used by frame_getcells */
-
-  ncells = PyTuple_GET_SIZE(code->co_cellvars);
-  for (j = ncells; j--; ) {
-    oldcell = fast[j + offset];
-    newcell = PyTuple_GET_ITEM(cells, index++);
-    Py_INCREF(newcell);
-    fast[j + offset] = newcell;
-    Py_DECREF(oldcell);
-  }
-
-  offset += ncells;
-
-  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
-  for (j = nfreevars; j--; ) {
-    oldcell = fast[j + offset];
-    newcell = PyTuple_GET_ITEM(cells, index++);
-    Py_INCREF(newcell);
-    fast[j + offset] = newcell;
-    Py_DECREF(oldcell);
-  }
-
-  Py_RETURN_NONE;
+  return swapped;
 }
 
 
 static PyMethodDef methods[] = {
+  { "cell_from_value", cell_from_value, METH_VARARGS,
+    "create a cell wrapping a value" },
 
-  { "frame_setlocals", frame_setlocals, METH_VARARGS,
+  { "frame_set_f_locals", frame_set_f_locals, METH_VARARGS,
     "set a frame's locals" },
 
-  { "frame_setglobals", frame_setglobals, METH_VARARGS,
+  { "frame_set_f_globals", frame_set_f_globals, METH_VARARGS,
     "set a frame's globals" },
 
-  { "frame_recreatecells", frame_recreatecells, METH_VARARGS,
-    "recreate a frame's cells with the same values" },
-
-  { "frame_getcells", frame_getcells, METH_VARARGS,
-    "get a frame's cells" },
-
-  { "frame_setcells", frame_setcells, METH_VARARGS,
-    "set a frame's cells" },
+  { "frame_swap_fast_cells", frame_swap_fast_cells, METH_VARARGS,
+    ("replaces fast local cells with matching cells. Returns a dict"
+     " of the original cells.") },
 
   { NULL, NULL, 0, NULL },
 };
