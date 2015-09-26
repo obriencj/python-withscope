@@ -68,10 +68,10 @@ original cells to their place when the scope ends.
 ## The Story
 
 I wanted some way to push and subsequently pop a lexical scope in
-Python. It's not a Pythonic thing to want, but that's fancy[^1] for
+Python. It's not a Pythonic thing to want, but that's [fancy] for
 you.
 
-[^1]: Where is fancy bred, in the heart or in the head?
+[fancy]: https://www.youtube.com/watch?v=TNrtHf9jJB8
 
 The managed interface looked very promising; the `with` keyword
 visually identified a region of code, and had hooks to setup and
