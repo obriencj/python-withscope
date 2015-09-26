@@ -23,7 +23,7 @@ this.
 """
 
 
-__all__ = ( "let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch" )
+__all__ = ("let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch")
 
 
 from inspect import currentframe
@@ -121,7 +121,7 @@ class LayeredMapping(object):
 
     def iteritems(self):
         for key, value in self.baseline.iteritems():
-            if key not in self.defkeys:
+            if key not in self._defkeys:
                 yield key, value
         for key, value in self.defined.iteritems():
             yield key, value
@@ -132,7 +132,7 @@ class LayeredMapping(object):
 
 
     def itervalues(self):
-        return (value for key,value in self.iteritems())
+        return (value for key, value in self.iteritems())
 
 
     def values(self):
@@ -167,6 +167,21 @@ class Scope(object):
     the scope is entered, those bindings will override the current
     frame's bindings for both reading and writing. When the scope
     is exited, the original bindings are restored.
+
+    Example:
+
+    >>> from withscope import let
+    >>> a = "taco"
+    >>> with let(a="pizza", b="beer"):
+    ...     print "%s and %s" % (a, b)
+    ...
+    pizza and beer
+    >>> print a
+    taco
+    >>> print b
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+    NameError: name 'b' is not defined
     """
 
     def __init__(self, *args, **kwds):
@@ -195,7 +210,7 @@ class Scope(object):
         """
 
         dup = self.__new__(type(self))
-        dup._defined = self.defined
+        dup._defined = self._defined
         dup._cells = self._cells
 
         dup._outer_frame = None
@@ -306,9 +321,7 @@ class Scope(object):
         return exc_type is None
 
 
-"""
-provide a happy little binding for the Scope class
-"""
+# provide a happy little binding for the Scope class
 let = Scope
 
 
