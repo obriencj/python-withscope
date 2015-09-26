@@ -1,9 +1,10 @@
 # Overview of python-withscope
 
-This is a completely mad idea, to create a working "let" syntax for
-[Python]. It should be regarded as a freak of nature and not used for
-anything serious. I did it because I was pretty sure I could, but I
-wanted to be certain.
+This project embodies a completely mad idea: create a working `let`
+syntax for [Python] to provide nested lexical scopes beyond the
+existing global/local scopes. It should be regarded as a freak of
+nature and not used for anything serious. I created this project
+because I was pretty sure I could do so, but I wanted to be certain.
 
 [python]: http://python.org "Python"
 
@@ -24,6 +25,7 @@ print b # >>> NameError: name 'b' is not defined
 You can also save scopes and re-enter them whenever you feel like it.
 
 ```python
+from withscope import let
 
 with let(a="pizza", b="beer") as my_scope:
 	print "actually, not that hungry right now"
@@ -40,6 +42,7 @@ Yes really, that works. It will correctly fall-through to outer scopes
 as well
 
 ```python
+from withscope import let
 
 monster = "godzilla"
 city = "Tokyo"
@@ -65,11 +68,14 @@ original cells to their place when the scope ends.
 ## The Story
 
 I wanted some way to push and subsequently pop a lexical scope in
-Python. It's not a Pythonic thing to want, but that's fancy for you.
+Python. It's not a Pythonic thing to want, but that's fancy[^1] for
+you.
 
-The managed interface looked very promising -- the `with` keyword
+[^1]: Where is fancy bred, in the heart or in the head?
+
+The managed interface looked very promising; the `with` keyword
 visually identified a region of code, and had hooks to setup and
-tear-down environmental changes, even if there were exceptions.
+tear-down environmental changes, even in the event of exceptions.
 
 My original experiments with this fell apart. I wanted to do the work
 in pure Python, but rewriting locals and globals was just a mess. It
@@ -79,9 +85,9 @@ frame.
 
 ### Finally Getting Around To It
 
-It was months and months later that I was awake one night and thought,
-"hey, let's give it a serious shot!" I hacked together a Scope class
-that would fetch locals, wrap it into a layered dict with the
+It was many months later that I was awake one night and thought, "hey,
+let's give it a serious shot!" I hacked together a `Scope` class that
+would fetch locals, wrap it into a layered dict with the
 user-specified scope bindings, and stuff it into the frame and back
 again.
 
@@ -92,41 +98,38 @@ read references would fall through and fetch the correct value. Any
 write references would be a local assignment. At the end of the scope,
 the layered globals could be discarded as useless.
 
-The next issue I encountered was a surprise -- when creating a
-closure, the cell vars are harvested pre-created from the frame. This
-meant that closures would revert to the original value when the scope
-closed, even if the closure was captured inside the new scope. I got
-around this by re-creating all the cells when pushing a new scope, but
-with the same values. Any closure of those cells would capture a cell
-unique to the scope, and then I'd put the original cells back in the
-frame at scope exit. The closures inside the scope saw their own
-cells, and the closures outside the scope saw the originals.
+I encountered a few issues. For example, when creating a closure, the
+cell vars are harvested pre-created from the frame. This meant that
+closures would revert to the original value when the scope closed,
+even if the closure was captured inside the new scope. I got around
+this by re-creating the appropriate cells when pushing a new scope,
+but with the same values. There was also an issue with how the `del`
+statement behaved, which caused me a great deal of frustration and
+eventually forced me to accept less-than-ideal behavior as expected. I
+wanted `del` of a lexical name to cause later references to
+fall-through to any prior definition. But there is no way for me to
+hook additional behavior to that statement at the point it occurs! I
+could detect it later, when for examples `locals()` would be called. I
+had to abandon fall-through and just accept that a `del` of a lexical
+name from within a scope would cause the name to be undefined until
+the scope exited.
 
-### What's Next
 
-Well, the cell hacking seemed good, but it's actually buggy in that
-it's duplicating cells for all cellvars, not just the ones in the
-scope. This means fall-through isn't working like it should. I need to
-only recreate cells that have keys in the scope defined variables.
+### What's Next?
 
-I am also unhappy with the behavior of `del var` when inside a
-scope. It should be removing the binding of the scope, thus causing
-fall-through. That isn't the case, unfortunately. I believe to make
-this work correctly, I will need to coalesc my frame modifications
-into a full frame swap.
+I've learned a lot about the many ways that Python stores runtime
+variables. They're all over the place. I've also learned some
+interesting things about frames, the allocator, and some of the
+bytecode implementation details. I'd like to take all of that and
+write it up for educational purposes, perhaps as a blog entry.
 
-I will grab the current frame inside the `__enter__` method, and swap
-the `f_back` frame out for a duplicate which has my own
-locals/globals/cells/fast embedded, with the same code and index
-references. Execution will continue in this new shadow frame, and then
-the `__exit__` method will be triggered. At that point, I will again
-grab the current frame and swap its `f_back` out, this time for the
-original return frame, but with an updated code index. Pretty sure
-that will work, anyway.
+I'd like to see if it's possible for me to rip out the
+`LayeredMapping` class entirely. Right now I use it as a frame locals
+replacement, but I think I may be able to just skip that and only
+modify frame fast locals, cells, and globals.
 
-I am also strongly considering re-implementing `LayeredMapping`
-natively, just because it's probably the slowest part of this whole
-thing, and it makes for ugly-to-read Python.
+I need more unit tests, and I'd like to make sure I have full
+code coverage.
 
 
 ## Requirements
@@ -134,7 +137,7 @@ thing, and it makes for ugly-to-read Python.
 * [Python] 2.6 or later (no support for Python 3, the underlying
   function fields differ a bit)
 
-In addition, following tools are used in building, testing, or
+In addition, the following tools are used in building, testing, or
 generating documentation from the project sources.
 
 * [Setuptools]
