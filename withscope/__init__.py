@@ -192,10 +192,7 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
-        # borrow the scope params as if they
         self._defined = dict(*args, **kwds)
-
-        #
         self._cells = dict((key, cell_from_value(val)) for
                            key, val in self._defined.iteritems())
 
@@ -207,6 +204,12 @@ class Scope(object):
         self._outer_cells = None
         self._inner_locals = None
         self._inner_globals = None
+
+        # optional Scope instance that we may be an alias of.  TODO:
+        # on __exit__ we should propagate our edits to self._defined
+        # to the _alias_parent such that if it is in_use, its frame is
+        # updated.
+        self._alias_parent = None
 
 
     def alias(self):
@@ -226,6 +229,8 @@ class Scope(object):
         dup._outer_cells = None
         dup._inner_locals = None
         dup._inner_globals = None
+
+        dup._alias_parent = self
 
         return dup
 
