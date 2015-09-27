@@ -271,6 +271,8 @@ class Scope(object):
         frame = self._outer_frame
         assert(frame is not None)
 
+        defined = self._defined
+
         self._outer_locals = frame.f_locals
         self._outer_globals = frame.f_globals
 
@@ -279,12 +281,24 @@ class Scope(object):
         # values.
         self._outer_cells = frame_swap_fast_cells(frame, self._cells)
 
-        inner_locals = LayeredMapping(self._outer_locals, self._defined)
+        # create a layered view that combines our defined variables
+        # on top of the previously existing locals
+        inner_locals = LayeredMapping(self._outer_locals, defined)
         frame_set_f_locals(frame, inner_locals)
         self._inner_locals = inner_locals
 
+        # we'll duplicate globals, and inject any "read-only" values
+        # from defined into it. We know something is only going to be
+        # read when it's not used in co_varnames.
         inner_globals = dict(self._outer_globals)
-        inner_globals.update(self._defined)
+        varnames = frame.f_code.co_varnames
+        if varnames:
+            for key, val in defined.iteritems():
+                if key not in varnames:
+                    inner_globals[key] = val
+        else:
+            inner_globals.update(defined)
+
         frame_set_f_globals(frame, inner_globals)
         self._inner_globals = inner_globals
 
