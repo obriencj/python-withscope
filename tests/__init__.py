@@ -22,7 +22,7 @@ Unit tests for withscope
 
 
 from unittest import TestCase
-from withscope import let
+from withscope import let, LayeredMapping
 
 
 class LetTest(TestCase):
@@ -79,7 +79,6 @@ class LetTest(TestCase):
                 b = "stew"
             self.assertEquals(a, "fajita")
             self.assertEquals(b, "stew")
-
         self.assertEquals(a, "fajita")
         self.assertEquals(b, "stew")
         self.assertEquals(c, "cake")
@@ -215,6 +214,228 @@ class LetTest(TestCase):
 
         self.assertTrue("a" not in locals())
         self.assertTrue("a" not in globals())
+
+
+    def test_scope_locals(self):
+        a = "taco"
+
+        with let(a="pizza", b="beer") as scope:
+            self.assertTrue(scope.in_use())
+
+            self.assertEquals(a, "pizza")
+
+            sl = scope.scope_locals()
+            l = locals()
+
+            self.assertEquals(a, "pizza")
+            self.assertEquals(sl["a"], "pizza")
+            self.assertEquals(sl["b"], "beer")
+            self.assertEquals(len(sl), 2)
+            self.assertEquals(l["a"], "pizza")
+            self.assertEquals(l["b"], "beer")
+
+            a = "hamburger"
+            self.assertEquals(a, "hamburger")
+
+            sl = scope.scope_locals()
+            l = locals()
+
+            self.assertEquals(sl["a"], "hamburger")
+            self.assertEquals(sl["b"], "beer")
+            self.assertEquals(len(sl), 2)
+            self.assertEquals(l["a"], "hamburger")
+            self.assertEquals(l["b"], "beer")
+
+        # modifying not-in-use scope locals is acceptable
+        self.assertFalse(scope.in_use())
+        sl = scope.scope_locals()
+        sl["b"] = "soda"
+
+        self.assertEquals(a, "taco")
+
+        with scope:
+            self.assertEquals(a, "hamburger")
+            self.assertEquals(b, "soda")
+
+
+_map_1 = {
+    "name": "William",
+    "job": "Blacksmith",
+    "age": 22,
+}
+
+
+_map_2 = {
+    "name": "Jack",
+    "job": "Pirate",
+    "age": 35,
+}
+
+
+class LayeredMappingTest(TestCase):
+
+
+    def test_equality(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+        L1 = LayeredMapping(A, B)
+        L2 = LayeredMapping(A, B)
+
+        self.assertTrue(A != L1)
+        self.assertTrue(L1 != A)
+        self.assertFalse(A == L1)
+        self.assertFalse(L1 == A)
+
+        self.assertTrue(L1 != L2)
+        self.assertFalse(L1 == L2)
+
+
+    def test_iters(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+        L = LayeredMapping(A, B)
+
+        expected_len = len(B)
+        expected_keys = set(B.keys())
+        expected_values = set(B.values())
+        expected_items = set(B.items())
+
+        self.assertEquals(dict(L), B)
+
+        self.assertEquals(len(L), expected_len)
+        self.assertEquals(set(L.keys()), expected_keys)
+        self.assertEquals(set(L.values()), expected_values)
+        self.assertEquals(set(L.items()), expected_items)
+
+        B["muppet_b"] = "Piggy"
+        expected_len += 1
+        expected_keys.add("muppet_b")
+        expected_values.add("Piggy")
+        expected_items.add(("muppet_b", "Piggy"))
+
+        self.assertEquals(len(L), expected_len)
+        self.assertEquals(dict(L), B)
+        self.assertEquals(set(L.keys()), expected_keys)
+        self.assertEquals(set(L.values()), expected_values)
+        self.assertEquals(set(L.items()), expected_items)
+
+        A["muppet_a"] = "Kermit"
+        expected_len += 1
+        expected_keys.add("muppet_a")
+        expected_values.add("Kermit")
+        expected_items.add(("muppet_a", "Kermit"))
+
+        self.assertEquals(len(L), expected_len)
+        self.assertEquals(set(L.keys()), expected_keys)
+        self.assertEquals(set(L.values()), expected_values)
+        self.assertEquals(set(L.items()), expected_items)
+
+
+    def test_del(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+
+        A["muppet_a"] = "Kermit"
+        B["muppet_b"] = "Piggy"
+
+        L = LayeredMapping(A, B)
+
+        del L["name"]
+        self.assertTrue("name" not in L)
+        self.assertTrue("name" not in B)
+        self.assertTrue("name" in A)
+
+        del L["muppet_a"]
+        self.assertTrue("muppet_a" not in L)
+        self.assertTrue("muppet_a" not in A)
+        self.assertTrue("muppet_a" not in B)
+
+        del L["muppet_b"]
+        self.assertTrue("muppet_b" not in L)
+        self.assertTrue("muppet_b" not in A)
+        self.assertTrue("muppet_b" not in B)
+
+        L["muppet_a"] = "Fozzie"
+        L["muppet_b"] = "Gonzo"
+
+        self.assertTrue("muppet_a" in A)
+        self.assertTrue("muppet_b" in B)
+        self.assertEquals(A["muppet_a"], "Fozzie")
+        self.assertEquals(B["muppet_b"], "Gonzo")
+
+        L["name"] = "Blackbeard"
+        self.assertTrue("name" in L)
+        self.assertTrue("name" in B)
+        self.assertEquals(B["name"], "Blackbeard")
+
+
+    def test_set(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+
+        A["muppet_a"] = "Kermit"
+        B["muppet_b"] = "Piggy"
+
+        L = LayeredMapping(A, B)
+
+        self.assertTrue("muppet_b" in L)
+        self.assertTrue("muppet_b" not in A)
+
+        L["muppet_a"] = "Fozzie"
+        self.assertTrue("muppet_a" in L)
+        self.assertTrue("muppet_a" not in B)
+        self.assertEquals(L["muppet_a"], "Fozzie")
+        self.assertEquals(A["muppet_a"], "Fozzie")
+
+        L["muppet_b"] = "Gonzo"
+        self.assertTrue("muppet_b" in L)
+        self.assertTrue("muppet_b" not in A)
+        self.assertEquals(L["muppet_b"], "Gonzo")
+        self.assertEquals(B["muppet_b"], "Gonzo")
+
+        L["another"] = "Godzilla"
+        self.assertTrue("another" in L)
+        self.assertTrue("another" in A)
+        self.assertTrue("another" not in B)
+        self.assertEquals(L["another"], "Godzilla")
+        self.assertEquals(A["another"], "Godzilla")
+
+
+    def test_get(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+
+        A["muppet_a"] = "Kermit"
+        B["muppet_b"] = "Piggy"
+
+        L = LayeredMapping(A, B)
+
+        self.assertEquals(L["name"], B["name"])
+        self.assertEquals(L["job"], B["job"])
+        self.assertEquals(L["age"], B["age"])
+
+        self.assertEquals(L.get("name"), B["name"])
+        self.assertEquals(L.get("job"), B["job"])
+        self.assertEquals(L.get("age"), B["age"])
+
+        self.assertEquals(L.get("food"), None)
+        self.assertEquals(L.get("food", "tacos"), "tacos")
+
+        self.assertEquals(L["muppet_a"], "Kermit")
+        self.assertEquals(L.get("muppet_a"), "Kermit")
+
+        self.assertEquals(L["muppet_b"], "Piggy")
+        self.assertEquals(L.get("muppet_b"), "Piggy")
+
+
+    def test_repr(self):
+        A = dict(_map_1)
+        B = dict(_map_2)
+
+        L = LayeredMapping(A, B)
+
+        self.assertEquals("{%r + %r}" % (A, B),
+                          repr(L))
 
 
 #
