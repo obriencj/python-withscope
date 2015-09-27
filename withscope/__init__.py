@@ -244,7 +244,7 @@ class Scope(object):
         """
 
         if self._outer_frame:
-            # if we're in use, refresh our locals dict
+            # if we're in-use, refresh our locals dict
             self._outer_frame.f_locals
 
         return self._defined
@@ -257,10 +257,75 @@ class Scope(object):
         return self._outer_frame is not None
 
 
+    def _reapply_frame(self):
+        if self._outer_frame:
+            self._revert_frame(False)
+            self._apply_frame()
+
+
+    def _apply_frame(self):
+        """
+        Apply our bindings to our frame
+        """
+
+        frame = self._outer_frame
+        assert(frame is not None)
+
+        self._outer_locals = frame.f_locals
+        self._outer_globals = frame.f_globals
+
+        # make sure to do this after observing f_locals, since
+        # fetching f_locals has the side-effect of mucking with cell
+        # values.
+        self._outer_cells = frame_swap_fast_cells(frame, self._cells)
+
+        inner_locals = LayeredMapping(self._outer_locals, self._defined)
+        frame_set_f_locals(frame, inner_locals)
+        self._inner_locals = inner_locals
+
+        inner_globals = dict(self._outer_globals)
+        inner_globals.update(self._defined)
+        frame_set_f_globals(frame, inner_globals)
+        self._inner_globals = inner_globals
+
+
+    def _revert_frame(self, merge=True):
+        """
+        Revert our frame and ensure our defined storage matches what was
+        in the frame's vars.
+        """
+
+        frame = self._outer_frame
+        assert(frame is not None)
+
+        if merge:
+            # this triggers copying the fast locals into the current
+            # locals dict, before we reset them, allowing outer scope
+            # references to be preserved and not incorrectly rewritten
+            _l = frame.f_locals
+
+        # put our original cells back
+        frame_swap_fast_cells(frame, self._outer_cells)
+
+        # put our locals back, which has the side-effect of syncing
+        # the cell values
+        frame_set_f_locals(frame, self._outer_locals)
+
+        frame_set_f_globals(frame, self._outer_globals)
+
+        self._outer_cells = None
+        self._outer_locals = None
+        self._outer_globals = None
+
+        self._inner_locals = None
+        self._inner_globals = None
+
+
     def __enter__(self):
         """
         Push our bindings, by hacking at the calling frame's locals,
-        globals, and fast var cells.
+        globals, and fast var cells. We are considered in-use until
+        __exit__ is called.
         """
 
         #print "__enter__ for %08x" % id(self)
@@ -270,59 +335,45 @@ class Scope(object):
 
         caller = currentframe().f_back
         self._outer_frame = caller
-        self._outer_locals = caller.f_locals
-        self._outer_globals = caller.f_globals
 
-        # make sure to do this after observing f_locals, since
-        # fetching f_locals has the side-effect of mucking with cell
-        # values.
-        self._outer_cells = frame_swap_fast_cells(caller, self._cells)
+        # ensure our defined values are up-to-date from the parent
+        # scope, if we are an alias
+        parent = self._alias_parent
+        if parent:
+            parent.scope_locals()
 
-        inner_locals = LayeredMapping(self._outer_locals, self._defined)
-        frame_set_f_locals(caller, inner_locals)
-        self._inner_locals = inner_locals
-
-        inner_globals = dict(self._outer_globals)
-        inner_globals.update(self._defined)
-        frame_set_f_globals(caller, inner_globals)
-        self._inner_globals = inner_globals
+        self._apply_frame()
 
         return self
 
 
     def __exit__(self, exc_type, _exc_val, _exc_tb):
         """
-        Pop our bindings
+        Pop our bindings, and we are no longer considered to be
+        in-use. Also syncs the scope variables to any parent aliases.
         """
 
         #print "__exit__ for %08x" % id(self)
 
         caller = currentframe().f_back
-
         if self._outer_frame is not caller:
             raise ScopeMismatch()
 
-        # this triggers copying the fast locals into the current
-        # locals dict, before we reset them, allowing outer scope
-        # references to be preserved and not incorrectly rewritten
-        assert(caller.f_locals is self._inner_locals)
+        # if we are an alias, we have to first let the parent
+        # get a sync'd copy of its variables from the frame. We
+        # can force this via asking it to calculate scope_locals
+        parent = self._alias_parent
+        if parent:
+            _l = parent.scope_locals()
 
-        # put our original cells back
-        frame_swap_fast_cells(caller, self._outer_cells)
-
-        # put our locals back, which has the side-effect of syncing
-        # the cell values
-        frame_set_f_locals(caller, self._outer_locals)
-
-        frame_set_f_globals(caller, self._outer_globals)
-
+        self._revert_frame()
         self._outer_frame = None
-        self._outer_cells = None
-        self._outer_locals = None
-        self._outer_globals = None
 
-        self._inner_locals = None
-        self._inner_globals = None
+        # if we are an alias, we have to now tell the parent
+        # that we've updated the shared defined dict, and have it
+        # apply those variables into its frame
+        if parent:
+            parent._reapply_frame()
 
         return exc_type is None
 
