@@ -35,6 +35,7 @@ class ScopeException(Exception):
     """
     Base class for the ScopeInUse and ScopeMismatch errors.
     """
+
     pass
 
 
@@ -44,6 +45,7 @@ class ScopeInUse(ScopeException):
     active. `Scope.alias()` can be used to create a duplicate Scope
     which can be re-used while the original was stil in use
     """
+
     pass
 
 
@@ -54,6 +56,7 @@ class ScopeMismatch(ScopeException):
     possible if someone were to manually call the __enter__/__exit__
     method of the Scope, incorrectly.
     """
+
     pass
 
 
