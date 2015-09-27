@@ -290,17 +290,19 @@ class Scope(object):
         # we'll duplicate globals, and inject any "read-only" values
         # from defined into it. We know something is only going to be
         # read when it's not used in co_varnames.
-        inner_globals = dict(self._outer_globals)
+        inner_globals = None
         varnames = frame.f_code.co_varnames
         if varnames:
             for key, val in defined.iteritems():
                 if key not in varnames:
+                    if inner_globals is None:
+                        inner_globals = dict(self._outer_globals)
                     inner_globals[key] = val
-        else:
-            inner_globals.update(defined)
 
-        frame_set_f_globals(frame, inner_globals)
-        self._inner_globals = inner_globals
+        # only bother overriding globals if we needed to do so.
+        if inner_globals:
+            frame_set_f_globals(frame, inner_globals)
+            self._inner_globals = inner_globals
 
 
     def _revert_frame(self, merge=True):
@@ -325,7 +327,9 @@ class Scope(object):
         # the cell values
         frame_set_f_locals(frame, self._outer_locals)
 
-        frame_set_f_globals(frame, self._outer_globals)
+        # only bother resetting globals if it were overridden
+        if self._inner_globals:
+            frame_set_f_globals(frame, self._outer_globals)
 
         self._outer_cells = None
         self._outer_locals = None
