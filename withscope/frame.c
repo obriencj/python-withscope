@@ -112,6 +112,8 @@ static PyObject *frame_swap_fast_cells(PyObject *self, PyObject *args) {
 	PyDict_SetItem(swapped, key, oldcell);
 	Py_DECREF(oldcell);
       }
+    } else {
+      PyErr_Clear();
     }
   }
 
@@ -128,6 +130,8 @@ static PyObject *frame_swap_fast_cells(PyObject *self, PyObject *args) {
 	PyDict_SetItem(swapped, key, oldcell);
 	Py_DECREF(oldcell);
       }
+    } else {
+      PyErr_Clear();
     }
   }
 
