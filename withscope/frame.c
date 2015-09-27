@@ -25,6 +25,7 @@
    point.
 
    author: Christopher O'Brien  <obriencj@gmail.com>
+   license: LGPL v.3
 */
 
 
