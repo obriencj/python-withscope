@@ -22,7 +22,7 @@ Unit tests for withscope
 
 
 from unittest import TestCase
-from withscope import let, LayeredMapping
+from withscope import let, ScopeInUse, ScopeMismatch, LayeredMapping
 
 
 class LetTest(TestCase):
@@ -256,6 +256,60 @@ class LetTest(TestCase):
         with scope:
             self.assertEquals(a, "hamburger")
             self.assertEquals(b, "soda")
+
+
+    def test_alias(self):
+        a = "hungry"
+        b = "thirsty"
+
+        # here we'll set up a helper function that will activate
+        # a given scope, and then assign the a and b values to the
+        # food and drink we supply.
+        def set_in_scope(my_scope, food, drink):
+            with my_scope:
+                a = food
+                b = drink
+
+        with let(a="pizza", b="beer") as scope:
+
+            # attempting to activate the existing scope prevents
+            # us from setting the rat poison
+            self.assertRaises(ScopeInUse, set_in_scope,
+                              scope, "rat", "poison")
+
+            self.assertEquals(a, "pizza")
+            self.assertEquals(b, "beer")
+
+            # instead, we alias the existing active scope, and we can
+            # happily use it instead. When it exits, our scope is
+            # refreshed with any values that might have changed via
+            # the alias.
+            capture = scope.alias()
+            set_in_scope(capture, "taco", "soda")
+
+            self.assertEquals(a, "taco")
+            self.assertEquals(b, "soda")
+
+        self.assertEquals(a, "hungry")
+        self.assertEquals(b, "thirsty")
+
+
+    def test_mismatch(self):
+        scope = let(a="pizza", b="beer")
+
+        def opener():
+            scope.__enter__()
+
+        def closer():
+            scope.__exit__(None, None, None)
+
+        opener()
+        self.assertTrue(scope.in_use())
+        self.assertRaises(ScopeMismatch, closer)
+
+        with scope.alias():
+            self.assertEquals(a, "pizza")
+            self.assertEquals(b, "beer")
 
 
 _map_1 = {
