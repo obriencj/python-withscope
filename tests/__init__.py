@@ -25,19 +25,24 @@ from unittest import TestCase
 from withscope import let, ScopeInUse, ScopeMismatch, LayeredMapping
 
 
+# global values to check for shadowing
+_a = "tacos"
+_b = "soda"
+
+
 class LetTest(TestCase):
 
 
     def test_simple_single(self):
         a = "tacos"
-        b = "soup"
+        b = "soda"
 
         with let(a="fajita"):
             self.assertEquals(a, "fajita")
-            self.assertEquals(b, "soup")
+            self.assertEquals(b, "soda")
 
         self.assertEquals(a, "tacos")
-        self.assertEquals(b, "soup")
+        self.assertEquals(b, "soda")
 
 
     def test_nested_let(self):
@@ -124,7 +129,7 @@ class LetTest(TestCase):
         that the correct cells are made available.
         """
 
-        a = [ "taco" ]
+        a = [ "tacos" ]
         b = [ None ]
 
         def get_a_1():
@@ -146,7 +151,7 @@ class LetTest(TestCase):
                 return b[0]
             self.assertEquals(get_a_2(), "fajita")
 
-        self.assertEquals(get_a_1(), "taco")
+        self.assertEquals(get_a_1(), "tacos")
         self.assertEquals(old_a_1(), None)
 
         self.assertEquals(get_a_2(), "fajita")
@@ -156,19 +161,19 @@ class LetTest(TestCase):
         set_a_2("curry")
 
         self.assertEquals(get_a_1(), "pizza")
-        self.assertEquals(old_a_1(), "taco")
+        self.assertEquals(old_a_1(), "tacos")
         self.assertEquals(get_a_2(), "curry")
         self.assertEquals(old_a_2(), "fajita")
 
         self.assertEquals(a[0], "pizza")
-        self.assertEquals(b[0], "taco")
+        self.assertEquals(b[0], "tacos")
         with scope:
             self.assertEquals(a[0], "curry")
             self.assertEquals(b[0], "fajita")
 
 
     def test_del_fast_local(self):
-        a = "taco"
+        a = "tacos"
 
         # testing `DELETE_NAME` opcode. Since `a` is already defined
         # above when we push our scope `a` will be considered a fast
@@ -185,13 +190,13 @@ class LetTest(TestCase):
 
             self.assertTrue("a" not in locals())
 
-        self.assertEquals(a, "taco")
+        self.assertEquals(a, "tacos")
 
         with scope:
-            self.assertEquals(a, "taco")
+            self.assertEquals(a, "tacos")
 
         #print locals()
-        self.assertEquals(a, "taco")
+        self.assertEquals(a, "tacos")
 
 
     def test_del_global(self):
@@ -217,7 +222,7 @@ class LetTest(TestCase):
 
 
     def test_scope_locals(self):
-        a = "taco"
+        a = "tacos"
 
         with let(a="pizza", b="beer") as scope:
             self.assertTrue(scope.in_use())
@@ -251,7 +256,7 @@ class LetTest(TestCase):
         sl = scope.scope_locals()
         sl["b"] = "soda"
 
-        self.assertEquals(a, "taco")
+        self.assertEquals(a, "tacos")
 
         with scope:
             self.assertEquals(a, "hamburger")
@@ -285,9 +290,9 @@ class LetTest(TestCase):
             # refreshed with any values that might have changed via
             # the alias.
             capture = scope.alias()
-            set_in_scope(capture, "taco", "soda")
+            set_in_scope(capture, "tacos", "soda")
 
-            self.assertEquals(a, "taco")
+            self.assertEquals(a, "tacos")
             self.assertEquals(b, "soda")
 
         self.assertEquals(a, "hungry")
@@ -310,6 +315,26 @@ class LetTest(TestCase):
         with scope.alias():
             self.assertEquals(a, "pizza")
             self.assertEquals(b, "beer")
+
+
+    def test_with_globals(self):
+        self.assertEquals(_b, "soda")
+
+        _a = "pizza"
+        with let(_b="beer"):
+            self.assertEquals(_a, "pizza")
+            self.assertEquals(_b, "beer")
+
+            # make sure we did NOT munge _a into globals, since we
+            # didn't need to do so
+            self.assertEquals(globals()["_a"], "tacos")
+
+            # since _b was not in co_varnames, it was munged into
+            # globals for this scope
+            self.assertEquals(globals()["_b"], "beer")
+
+        # check that _b was returned to the original global val
+        self.assertEquals(globals()["_b"], "soda")
 
 
 _map_1 = {
