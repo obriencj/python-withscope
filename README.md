@@ -1,7 +1,7 @@
 # Overview of python-withscope
 
-[![Build Status](https://travis-ci.org/obriencj/python-withscope.png?branch=master)](https://travis-ci.org/obriencj/python-withscope)
-[![Coverage Status](https://coveralls.io/repos/obriencj/python-withscope/badge.png?branch=master)](https://coveralls.io/r/obriencj/python-withscope?branch=master)
+[![Build Status](https://travis-ci.org/obriencj/python-withscope.svg?branch=master)](https://travis-ci.org/obriencj/python-withscope)
+[![Coverage Status](https://coveralls.io/repos/obriencj/python-withscope/badge.svg?branch=master)](https://coveralls.io/r/obriencj/python-withscope?branch=master)
 
 This project embodies a completely mad idea: create a working `let`
 syntax for [Python] to provide nested lexical scopes beyond the
