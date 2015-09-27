@@ -67,12 +67,12 @@ class LayeredMapping(object):
     def __init__(self, baseline, defined):
         self.baseline = baseline
         self.defined = defined
-        self._defkeys = set(defined.iterkeys())
+        self._delkeys = set()
 
 
     def __getitem__(self, key):
         # no fall-through if it was originally defined but deleted
-        if key in self._defkeys:
+        if key in self.defined or key in self._delkeys:
             return self.defined[key]
         else:
             return self.baseline[key]
@@ -80,7 +80,10 @@ class LayeredMapping(object):
 
     def __setitem__(self, key, value):
         #print "setting item %r in %08x to %r" % (key, id(self), value)
-        if key in self._defkeys:
+        if key in self.defined:
+            self.defined[key] = value
+        elif key in self._delkeys:
+            self._delkeys.remove(key)
             self.defined[key] = value
         else:
             self.baseline[key] = value
@@ -88,7 +91,8 @@ class LayeredMapping(object):
 
     def __delitem__(self, key):
         #print "delitem %08x %r" % (id(self), key)
-        if key in self._defkeys:
+        if key in self.defined or key in self._delkeys:
+            self._delkeys.add(key)
             del self.defined[key]
         else:
             del self.baseline[key]
@@ -96,20 +100,23 @@ class LayeredMapping(object):
 
     def __iter__(self):
         for key in self.baseline:
-            if key not in self._defkeys:
+            if key not in self.defined and key not in self._delkeys:
                 yield key
         for key in self.defined:
             yield key
 
 
     def __len__(self):
-        return len(iter(self))
+        count = 0
+        for count, _val in enumerate(iter(self), 1):
+            pass
+        return count
 
 
     def __contains__(self, key):
         return (key in self.defined or
                 (key in self.baseline and
-                 key not in self._defkeys))
+                 key not in self._delkeys))
 
 
     iterkeys = __iter__
@@ -121,7 +128,7 @@ class LayeredMapping(object):
 
     def iteritems(self):
         for key, value in self.baseline.iteritems():
-            if key not in self._defkeys:
+            if key not in self.defined and key not in self._delkeys:
                 yield key, value
         for key, value in self.defined.iteritems():
             yield key, value
@@ -223,32 +230,26 @@ class Scope(object):
         return dup
 
 
-    def __getitem__(self, key):
-        return self._defined[key]
+    def scope_locals(self):
+        """
+        Get a representation of the locals specific to this
+        scope. Modifying these values while the scope is in-use is not
+        recommended, and will have difficult-to-explain results
+        depending on the particulars of the named value being changed.
+        """
+
+        if self._outer_frame:
+            # if we're in use, refresh our locals dict
+            self._outer_frame.f_locals
+
+        return self._defined
 
 
-    def __setitem__(self, key, value):
-        self._defined[key] = value
-
-
-    def __contains__(self, key):
-        return key in self._defined
-
-
-    def __delitem__(self, key):
-        del self._defined[key]
-
-
-    def iteritems(self):
-        return self._defined.iteritems()
-
-
-    def items(self):
-        return self._defined.items()
-
-
-    def __iter__(self):
-        return iter(self._defined)
+    def in_use(self):
+        """
+        Boolean noting whether this scope is currently in-use
+        """
+        return self._outer_frame is not None
 
 
     def __enter__(self):
@@ -299,7 +300,7 @@ class Scope(object):
         # this triggers copying the fast locals into the current
         # locals dict, before we reset them, allowing outer scope
         # references to be preserved and not incorrectly rewritten
-        caller.f_locals
+        assert(caller.f_locals is self._inner_locals)
 
         # put our original cells back
         frame_swap_fast_cells(caller, self._outer_cells)
