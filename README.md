@@ -7,7 +7,10 @@ This project embodies a completely mad idea: create a working `let`
 syntax for [Python] to provide nested lexical scopes beyond the
 existing global/local scopes. It should be regarded as a freak of
 nature and not used for anything serious. I created this project
-because I was pretty sure I could do so, but I wanted to be certain.
+because I was pretty sure I could do so, but I wanted to be
+certain. Also, I get a real buzz when something like this works, and
+throwing back my head with screams of laughter is my chicken
+soup for the soul.
 
 [python]: http://python.org "Python"
 
@@ -131,9 +134,6 @@ I'd like to see if it's possible for me to rip out the
 replacement, but I think I may be able to just skip that and only
 modify frame fast locals, cells, and globals.
 
-I need more unit tests, and I'd like to make sure I have full
-code coverage.
-
 
 ## Requirements
 
@@ -144,11 +144,14 @@ In addition, the following tools are used in building, testing, or
 generating documentation from the project sources.
 
 * [Setuptools]
+* [Coverage.py]
 
 These are all available in most linux distributions (eg. [Fedora]), and
 for OSX via [MacPorts].
 
 [setuptools]: http://pythonhosted.org/setuptools/
+
+[coverage.py]: http://nedbatchelder.com/code/coverage/
 
 [fedora]: http://fedoraproject.org/
 
@@ -173,6 +176,45 @@ tests, simply invoke:
 ```bash
 python setup.py test
 ```
+
+You may check code coverage via [coverage.py], invoked as:
+
+```bash
+# generates coverage data in .coverage
+coverage run --source=withscope setup.py test
+
+# creates an html report from the above in htmlcov/index.html
+coverage html
+```
+
+I've setup [travis-ci] and [coveralls.io] for this project, so tests
+are run automatically, and coverage is computed then. Results are
+available online:
+
+* [python-withscope on Travis-CI][withscope-travis]
+* [python-withscope on Coveralls.io][withscope-coveralls]
+
+[travis-ci]: https://travis-ci.org
+
+[coveralls.io]: https://coveralls.io
+
+[withscope-travis]: https://travis-ci.org/obriencj/python-withscope
+
+[withscope-coveralls]: https://coveralls.io/r/obriencj/python-withscope
+
+
+## TODO
+
+* type-checking in the withscope._frame extension
+* Is a documentation branch worthwhile?
+* Is a Python 3 branch worthwhile?
+* write more examples, eg. depicting the use of `Scope.alias()`
+* a scope that references an object's attributes via getattr (for use
+  with something like the option object from `optparser`)
+* profiling and optimizations?
+* can we remove LayeredMapping? (leaning towards no, so can we optimize?)
+* specialty allocator that caches a copy on the calling frame or code
+  object (or more likely a threadlocal mapping to the code instance)
 
 
 ## Author
