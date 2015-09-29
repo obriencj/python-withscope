@@ -25,37 +25,48 @@ license: LGPL v.3
 """
 
 
-from setuptools import setup, Extension
+try :
+    from setuptools import setup, Extension
+except ImportError:
+    from distutils.core import setup, Extension
 
-ext = [ Extension("withscope._frame", ["withscope/frame.c"]), ]
 
-setup( name = "withscope",
-       version = "0.9.0",
+TROVE_CLASSIFIERS = (
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved"
+    " :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 2 :: Only",
+    "Programming Language :: Python :: 2.6",
+    "Programming Language :: Python :: 2.7",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+)
 
-       packages = [ "withscope" ],
 
-       ext_modules = ext,
+ext_frame = Extension("withscope._frame", ["withscope/frame.c"])
 
-       test_suite = "tests",
 
-       # PyPI information
-       author = "Christopher O'Brien",
-       author_email = "obriencj@gmail.com",
-       url = "https://github.com/obriencj/python-withscope",
-       license = "GNU Lesser General Public License",
+setup(name = "withscope",
+      version = "0.9.0",
 
-       description = "Hack stack frames to provide local scopes via"
-       " the managed interface.",
+      packages = ["withscope"],
+      ext_modules = [ext_frame],
 
-       provides = [ "withscope" ],
-       requires = [],
-       platforms = [ "python2 >= 2.6" ],
+      test_suite = "tests",
 
-       zip_safe = True,
+      zip_safe = True,
 
-       classifiers = ["Intended Audience :: Developers",
-                      "Programming Language :: Python :: 2",
-                      "Topic :: Software Development"], )
+      # PyPI information
+      author = "Christopher O'Brien",
+      author_email = "obriencj@gmail.com",
+      url = "https://github.com/obriencj/python-withscope",
+      license = "GNU Lesser General Public License",
+
+      description = "Context manager providing nesting lexical scopes",
+
+      classifiers = TROVE_CLASSIFIERS)
 
 #
 # The end.
