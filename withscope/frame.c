@@ -44,6 +44,29 @@ static PyObject *cell_from_value(PyObject *self, PyObject *args) {
 }
 
 
+static PyObject *cell_get_value(PyObject *self, PyObject *args) {
+  PyObject *cell = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!", &PyCell_Type, &cell))
+    return NULL;
+
+  return PyCell_Get(cell);
+}
+
+
+static PyObject *cell_set_value(PyObject *self, PyObject *args) {
+  PyObject *cell = NULL;
+  PyObject *val = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!O", &PyCell_Type, &cell, &val))
+    return NULL;
+
+  PyCell_Set(cell, val);
+
+  Py_RETURN_NONE;
+}
+
+
 /**
    Sets the locals dict for a call frame, and refreshes the fast
    access vars from that dict.
@@ -82,6 +105,92 @@ static PyObject *frame_set_f_globals(PyObject *self, PyObject *args) {
   Py_DECREF(old_globals);
 
   Py_RETURN_NONE;
+}
+
+
+static PyObject *frame_apply_vars(PyObject *self, PyObject *args) {
+  PyFrameObject *frame = NULL;
+  PyObject *scopecells = NULL;
+  PyObject *nil = NULL;
+
+  if (! PyArg_ParseTuple(args, "O!OO", &PyFrame_Type, &frame,
+			 &scopecells, &nil))
+    return NULL;
+
+  PyCodeObject *code = frame->f_code;
+  PyObject **fast = frame->f_localsplus;
+  int i, offset, ncells, nfreevars;
+  PyObject *key, *newcell, *oldcell;
+  PyObject *oldval;
+
+  PyObject *o_vars, *o_cells, *o_free;
+  PyObject *ret = PyTuple_New(3);
+
+  o_vars = PyDict_New();
+  o_cells = PyDict_New();
+  o_free = PyDict_New();
+
+  PyTuple_SET_ITEM(ret, 0, o_vars);
+  PyTuple_SET_ITEM(ret, 1, o_cells);
+  PyTuple_SET_ITEM(ret, 2, o_free);
+
+  // first we go through locals, and if we find a var matching a
+  // defined name, we swap our value in and store the original in a
+  // dictionary so we can restore it later. The scope stores all its
+  // values wrapped in cells
+  for (i = code->co_nlocals; i--; ) {
+    key = PyTuple_GET_ITEM(code->co_varnames, i);
+    newcell = PyObject_GetItem(scopecells, key);
+
+    if (newcell) {
+      oldval = fast[i];
+      fast[i] = PyCell_Get(newcell);
+      PyObject_SetItem(o_vars, key, oldval? oldval: nil);
+      Py_XDECREF(oldval);
+      Py_DECREF(newcell);
+
+    } else {
+      PyErr_Clear();
+    }
+  }
+
+  offset = code->co_nlocals;
+  ncells = PyTuple_GET_SIZE(code->co_cellvars);
+
+  for (i = ncells; i--; ) {
+    key = PyTuple_GET_ITEM(code->co_cellvars, i);
+    newcell = PyObject_GetItem(scopecells, key);
+
+    if (newcell) {
+      oldcell = fast[offset + i];
+      fast[offset + i] = (newcell == nil? NULL: newcell);
+      PyObject_SetItem(o_cells, key, oldcell? oldcell: nil);
+      Py_XDECREF(oldcell);
+
+    } else {
+      PyErr_Clear();
+    }
+  }
+
+  offset += ncells;
+  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
+
+  for (i = nfreevars; i--; ) {
+    key = PyTuple_GET_ITEM(code->co_freevars, i);
+    newcell = PyObject_GetItem(scopecells, key);
+
+    if (newcell) {
+      oldcell = fast[offset + i];
+      fast[offset + i] = (newcell == nil? NULL: newcell);
+      PyObject_SetItem(o_free, key, oldcell? oldcell: nil);
+      Py_XDECREF(oldcell);
+
+    } else {
+      PyErr_Clear();
+    }
+  }
+
+  return ret;
 }
 
 
@@ -144,6 +253,12 @@ static PyMethodDef methods[] = {
   { "cell_from_value", cell_from_value, METH_VARARGS,
     "create a cell wrapping a value" },
 
+  { "cell_get_value", cell_get_value, METH_VARARGS,
+    "get a value from inside a cell" },
+
+  { "cell_set_value", cell_set_value, METH_VARARGS,
+    "set a cell's value" },
+
   { "frame_set_f_locals", frame_set_f_locals, METH_VARARGS,
     "set a frame's locals" },
 
@@ -153,6 +268,11 @@ static PyMethodDef methods[] = {
   { "frame_swap_fast_cells", frame_swap_fast_cells, METH_VARARGS,
     ("replaces fast local cells with matching cells. Returns a dict"
      " of the original cells.") },
+
+  { "frame_apply_vars", frame_apply_vars, METH_VARARGS,
+    ("replaces fast locals and cells with values and cells from the"
+     "given dict. Returns a tuple of two dicts of original vals and"
+     "cells.") },
 
   { NULL, NULL, 0, NULL },
 };

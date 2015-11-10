@@ -26,9 +26,16 @@ this.
 __all__ = ("let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch")
 
 
+from functools import partial
 from inspect import currentframe
+from operator import is_
+
 from ._frame import cell_from_value, frame_swap_fast_cells, \
     frame_set_f_locals, frame_set_f_globals
+
+
+_nil = object()
+_is_nil = partial(is_, _nil)
 
 
 class ScopeException(Exception):
@@ -60,114 +67,6 @@ class ScopeMismatch(ScopeException):
     pass
 
 
-class LayeredMapping(object):
-    """
-    A dict-like object that will store an initial set of values, and
-    will otherwise fall-through to read/write values from a baseline
-    dict.
-    """
-
-    def __init__(self, baseline, defined):
-        self.baseline = baseline
-        self.defined = defined
-        self._delkeys = set()
-
-
-    def __getitem__(self, key):
-        # no fall-through if it was originally defined but deleted
-        if key in self.defined or key in self._delkeys:
-            return self.defined[key]
-        else:
-            return self.baseline[key]
-
-
-    def __setitem__(self, key, value):
-        #print "setting item %r in %08x to %r" % (key, id(self), value)
-        if key in self.defined:
-            self.defined[key] = value
-        elif key in self._delkeys:
-            self._delkeys.remove(key)
-            self.defined[key] = value
-        else:
-            self.baseline[key] = value
-
-
-    def __delitem__(self, key):
-        #print "delitem %08x %r" % (id(self), key)
-        if key in self.defined or key in self._delkeys:
-            self._delkeys.add(key)
-            del self.defined[key]
-        else:
-            del self.baseline[key]
-
-
-    def __iter__(self):
-        for key in self.baseline:
-            if key not in self.defined and key not in self._delkeys:
-                yield key
-        for key in self.defined:
-            yield key
-
-
-    def __len__(self):
-        count = 0
-        for count, _val in enumerate(iter(self), 1):
-            pass
-        return count
-
-
-    def __contains__(self, key):
-        return (key in self.defined or
-                (key in self.baseline and
-                 key not in self._delkeys))
-
-
-    iterkeys = __iter__
-
-
-    def keys(self):
-        return list(self.iterkeys())
-
-
-    def iteritems(self):
-        for key, value in self.baseline.iteritems():
-            if key not in self.defined and key not in self._delkeys:
-                yield key, value
-        for key, value in self.defined.iteritems():
-            yield key, value
-
-
-    def items(self):
-        return list(self.iteritems())
-
-
-    def itervalues(self):
-        return (value for key, value in self.iteritems())
-
-
-    def values(self):
-        return list(self.itervalues())
-
-
-    def __repr__(self):
-        return "{%r + %r}" % (self.baseline, self.defined)
-
-
-    def get(self, key, defaultval=None):
-        try:
-            return self[key]
-        except KeyError:
-            return defaultval
-
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-
-    def __eq__(self, other):
-        return self is other
-
-
 class Scope(object):
     """
     A lexical scope, activated and revoked via the python managed
@@ -195,9 +94,11 @@ class Scope(object):
     """
 
     def __init__(self, *args, **kwds):
-        self._defined = dict(*args, **kwds)
+        #self._defined = dict(*args, **kwds)
+        defined = dict(*args, **kwds)
+
         self._cells = dict((key, cell_from_value(val)) for
-                           key, val in self._defined.iteritems())
+                           key, val in defined.iteritems())
 
         # this is the state we gather at __enter__ and need to restore
         # at __exit__
@@ -223,7 +124,6 @@ class Scope(object):
         """
 
         dup = self.__new__(type(self))
-        dup._defined = self._defined
         dup._cells = self._cells
 
         dup._outer_frame = None
@@ -238,19 +138,29 @@ class Scope(object):
         return dup
 
 
-    def scope_locals(self):
-        """
-        Get a representation of the locals specific to this
-        scope. Modifying these values while the scope is in-use is not
-        recommended, and will have difficult-to-explain results
-        depending on the particulars of the named value being changed.
-        """
+    def __getitem__(self, key):
+        cell = self._cells.get(key, None)
+        if not cell:
+            raise KeyError(key)
+        return cell_get_value(cell)
 
-        if self._outer_frame:
-            # if we're in-use, refresh our locals dict
-            self._outer_frame.f_locals
 
-        return self._defined
+    def __setitem__(self, key, value):
+        cell = self._cells.get(key, None)
+        if not cell:
+            cell = cell_from_value(value)
+        else:
+            cell_set_value(cell, value)
+
+
+    def __delitem__(self, key):
+        cell = self._cells.pop(key, None)
+        if not cell:
+            raise KeyError(key)
+
+
+    def __contains__(self, key):
+        return key in self._cells
 
 
     def in_use(self):
@@ -260,16 +170,83 @@ class Scope(object):
         return self._outer_frame is not None
 
 
-    def _reapply_frame(self):
-        if self._outer_frame:
-            self._revert_frame(False)
-            self._apply_frame()
+    def _frame_reapply(self):
+        # todo: throw this out. We'll need to change the model
+        # for how we push changes from a alias scoped into our
+        # current frame. Since we'll be sharing the cells, it
+        # may be as simple as re-pushing the vars.
+
+        frame = self._outer_frame
+        if frame:
+            _unused = frame_apply_vars(frame, self._cells, _nil)
+
+
+    def _frame_apply(self):
+        frame = self._outer_frame
+        assert(frame is not None)
+
+        fast, cell, free = frame_apply_vars(frame, self._cells, _nil)
+        self._outer_vars = fast
+        self._outer_cells = cells
+        self._outer_free = free
+
+        #self._outer_vars = frame_swap_vars(frame, self._cells)
+        #self._outer_cells = frame_swap_cells(frame, self._cells)
+
+        inner_globals = None
+        outer_globals = None
+        varnames = frame.f_code.co_varnames
+
+        # construct an inner_globals for bindings that we could not
+        # assign as local variables, cell variables, or free variables
+        for key, val in self._cells.iteritems():
+            if key not in varnames:
+                if inner_globals is None:
+                    inner_globals = {}
+                inner_globals[key] = cell_get_value(val)
+
+        if inner_globals is not None:
+            outer_globals = frame_swap_globals(frame, inner_globals)
+
+        self._inner_globals = inner_globals
+        self._outer_globals = outer_globals
+
+
+    def _frame_revert(self):
+        frame = self._outer_frame
+        assert(frame is not None)
+
+        _n = _nil
+
+        fast = self._outer_vars
+        cells = self._outer_cells
+        free = self._outer_free
+        updates = frame_revert_vars(frame, fast, cells, free, _n)
+
+        self._outer_vars = None
+        self._outer_cells = None
+        self._outer_free = None
+
+        #HERE
+        for key, val in updates.iteritems():
+            if val is _n:
+                del self._cells[key]
+            else:
+                cell_set_value(self._cells[key], val)
+
+        if self._inner_globals is not None:
+            # todo, undo our changes to globals
+            pass #HERE
+
+        self._inner_globals = None
+        self._outer_globals = None
 
 
     def _apply_frame(self):
         """
         Apply our bindings to our frame
         """
+        # OLD
 
         frame = self._outer_frame
         assert(frame is not None)
