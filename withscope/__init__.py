@@ -30,12 +30,16 @@ from functools import partial
 from inspect import currentframe
 from operator import is_
 
-from ._frame import cell_from_value, frame_swap_fast_cells, \
-    frame_set_f_locals, frame_set_f_globals
+from ._frame import (cell_get_value, cell_set_value,
+                     cell_from_value, frame_set_f_globals,
+                     frame_apply_vars, frame_revert_vars)
 
 
-_nil = object()
-_is_nil = partial(is_, _nil)
+class nil(object):
+    def __repr__(self):
+        return "nil"
+nil = nil()
+is_nil = partial(is_, nil)
 
 
 class ScopeException(Exception):
@@ -171,27 +175,18 @@ class Scope(object):
 
 
     def _frame_reapply(self):
-        # todo: throw this out. We'll need to change the model
-        # for how we push changes from a alias scoped into our
-        # current frame. Since we'll be sharing the cells, it
-        # may be as simple as re-pushing the vars.
-
         frame = self._outer_frame
         if frame:
-            _unused = frame_apply_vars(frame, self._cells, _nil)
+            _unused = frame_apply_vars(frame, self._cells, nil)
 
 
     def _frame_apply(self):
         frame = self._outer_frame
         assert(frame is not None)
 
-        fast, cell, free = frame_apply_vars(frame, self._cells, _nil)
+        fast, cells = frame_apply_vars(frame, self._cells, nil)
         self._outer_vars = fast
         self._outer_cells = cells
-        self._outer_free = free
-
-        #self._outer_vars = frame_swap_vars(frame, self._cells)
-        #self._outer_cells = frame_swap_cells(frame, self._cells)
 
         inner_globals = None
         outer_globals = None
@@ -206,7 +201,7 @@ class Scope(object):
                 inner_globals[key] = cell_get_value(val)
 
         if inner_globals is not None:
-            outer_globals = frame_swap_globals(frame, inner_globals)
+            outer_globals = frame_swap_globals(frame, inner_globals, nil)
 
         self._inner_globals = inner_globals
         self._outer_globals = outer_globals
@@ -216,107 +211,54 @@ class Scope(object):
         frame = self._outer_frame
         assert(frame is not None)
 
-        _n = _nil
+        n = nil
 
         fast = self._outer_vars
         cells = self._outer_cells
-        free = self._outer_free
-        updates = frame_revert_vars(frame, fast, cells, free, _n)
+
+        fast, cells = frame_revert_vars(frame, fast, cells, n)
 
         self._outer_vars = None
         self._outer_cells = None
-        self._outer_free = None
 
-        #HERE
-        for key, val in updates.iteritems():
-            if val is _n:
+        for key, val in fast.iteritems():
+            if val is n:
                 del self._cells[key]
             else:
                 cell_set_value(self._cells[key], val)
 
+        for key, val in cells.iteritems():
+            if val is n:
+                del self._cells[key]
+            else:
+                pass
+
         if self._inner_globals is not None:
-            # todo, undo our changes to globals
-            pass #HERE
+            changes = frame_swap_globals(frame, self._outer_globals, n)
+            for key, val in changes.iteritems():
+                if val is n:
+                    del self._cells[key]
+                else:
+                    cell_set_value(self._cells[key], val)
 
         self._inner_globals = None
         self._outer_globals = None
 
 
-    def _apply_frame(self):
-        """
-        Apply our bindings to our frame
-        """
-        # OLD
+    def _refresh(self):
+        """ refresh the values of our defined cells from the fast vars
+        in our frame, if any. This happens automatically when the scope
+        exits as well."""
 
-        frame = self._outer_frame
-        assert(frame is not None)
+        if not self._outer_frame:
+            return
 
-        defined = self._defined
-
-        self._outer_locals = frame.f_locals
-        self._outer_globals = frame.f_globals
-
-        # make sure to do this after observing f_locals, since
-        # fetching f_locals has the side-effect of mucking with cell
-        # values.
-        self._outer_cells = frame_swap_fast_cells(frame, self._cells)
-
-        # create a layered view that combines our defined variables
-        # on top of the previously existing locals
-        inner_locals = LayeredMapping(self._outer_locals, defined)
-        frame_set_f_locals(frame, inner_locals)
-        self._inner_locals = inner_locals
-
-        # we'll duplicate globals, and inject any "read-only" values
-        # from defined into it. We know something is only going to be
-        # read when it's not used in co_varnames.
-        inner_globals = None
-        varnames = frame.f_code.co_varnames
-        if varnames:
-            for key, val in defined.iteritems():
-                if key not in varnames:
-                    if inner_globals is None:
-                        inner_globals = dict(self._outer_globals)
-                    inner_globals[key] = val
-
-        # only bother overriding globals if we needed to do so.
-        if inner_globals:
-            frame_set_f_globals(frame, inner_globals)
-            self._inner_globals = inner_globals
-
-
-    def _revert_frame(self, merge=True):
-        """
-        Revert our frame and ensure our defined storage matches what was
-        in the frame's vars.
-        """
-
-        frame = self._outer_frame
-        assert(frame is not None)
-
-        if merge:
-            # this triggers copying the fast locals into the current
-            # locals dict, before we reset them, allowing outer scope
-            # references to be preserved and not incorrectly rewritten
-            _l = frame.f_locals
-
-        # put our original cells back
-        frame_swap_fast_cells(frame, self._outer_cells)
-
-        # put our locals back, which has the side-effect of syncing
-        # the cell values
-        frame_set_f_locals(frame, self._outer_locals)
-
-        # only bother resetting globals if it were overridden
-        if self._inner_globals:
-            frame_set_f_globals(frame, self._outer_globals)
-
-        self._outer_cells = None
-        self._outer_locals = None
-        self._outer_globals = None
-
-        self._inner_locals = None
-        self._inner_globals = None
+        # TODO: make a more direct version of this, that works with
+        # deleted vars
+        l = self._outer_frame.f_locals
+        for key, val in l.iteritems():
+            if key in self._cells:
+                cell_set_value(self._cells[key], val)
 
 
     def __enter__(self):
@@ -338,9 +280,9 @@ class Scope(object):
         # scope, if we are an alias
         parent = self._alias_parent
         if parent:
-            parent.scope_locals()
+            parent._refresh()
 
-        self._apply_frame()
+        self._frame_apply()
 
         return self
 
@@ -358,26 +300,56 @@ class Scope(object):
             raise ScopeMismatch()
 
         # if we are an alias, we have to first let the parent
-        # get a sync'd copy of its variables from the frame. We
-        # can force this via asking it to calculate scope_locals
+        # get a sync'd copy of its variables from the frame.
         parent = self._alias_parent
         if parent:
-            _l = parent.scope_locals()
+            parent._refresh()
 
-        self._revert_frame()
+        self._frame_revert()
         self._outer_frame = None
 
         # if we are an alias, we have to now tell the parent
         # that we've updated the shared defined dict, and have it
         # apply those variables into its frame
         if parent:
-            parent._reapply_frame()
+            parent._frame_reapply()
 
         return exc_type is None
 
 
 # provide a happy little binding for the Scope class
 let = Scope
+
+
+def frame_swap_globals(frame, updates, nil):
+    # TODO: move this into frame.c
+
+    assert(frame is not None)
+
+    glbls = frame.f_globals
+    lcls = frame.f_locals
+    originals = {}
+
+    for key, val in updates.iteritems():
+        if key in glbls:
+            originals[key] = glbls[key]
+            if val is nil:
+                del glbls[key]
+                del lcls[key]
+            else:
+                glbls[key] = val
+                lcls[key] = val
+        else:
+            originals[key] = nil
+            if val is nil:
+                # nothing to do, this is a delete sentinel and it's
+                # already not present.
+                pass
+            else:
+                glbls[key] = val
+                lcls[key] = val
+
+    return originals
 
 
 #
