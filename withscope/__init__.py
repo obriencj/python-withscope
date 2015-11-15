@@ -26,9 +26,7 @@ this.
 __all__ = ("let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch")
 
 
-from functools import partial
 from inspect import currentframe
-from operator import is_
 
 from ._frame import (cell_get_value, cell_set_value,
                      cell_from_value, frame_set_f_globals,
@@ -39,7 +37,6 @@ class nil(object):
     def __repr__(self):
         return "nil"
 nil = nil()
-is_nil = partial(is_, nil)
 
 
 class ScopeException(Exception):
