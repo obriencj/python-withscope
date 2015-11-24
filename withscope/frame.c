@@ -86,6 +86,11 @@ static PyObject *frame_set_f_globals(PyObject *self, PyObject *args) {
 }
 
 
+/**
+   From the dict newcells, find cells in fast (named by their index in
+   vars) that match, and replace the fast reference with the
+   newcells[name] reference. Record swaps in the swapped dict.
+ */
 static inline void
 fast_cells_swap(PyObject **fast, int offset, PyObject *vars,
 		PyObject *newcells, PyObject *swapped) {
