@@ -86,6 +86,33 @@ static PyObject *frame_set_f_globals(PyObject *self, PyObject *args) {
 }
 
 
+static inline void
+fast_cells_swap(PyObject **fast, int offset, PyObject *vars,
+		PyObject *newcells, PyObject *swapped) {
+
+  PyObject *key, *newcell, *oldcell;
+  int count = PyTuple_GET_SIZE(vars);
+  int index;
+
+  while (count-- ) {
+    key = PyTuple_GET_ITEM(vars, count);
+    newcell = PyObject_GetItem(newcells, key);
+
+    if (newcell) {
+      index = offset + count;
+      oldcell = fast[index];
+      fast[index] = newcell;
+
+      PyObject_SetItem(swapped, key, oldcell);
+      Py_DECREF(oldcell);
+
+    } else {
+      PyErr_Clear();
+    }
+  }
+}
+
+
 static PyObject *frame_revert_vars(PyObject *self, PyObject *args) {
   PyFrameObject *frame = NULL;
   PyObject *revert_vars, *revert_cells;
@@ -100,9 +127,8 @@ static PyObject *frame_revert_vars(PyObject *self, PyObject *args) {
 
   PyCodeObject *code = frame->f_code;
   PyObject **fast = frame->f_localsplus;
-  int i, offset, ncells, nfreevars;
-  PyObject *key, *newcell, *oldcell;
-  PyObject *newval, *oldval;
+  PyObject *key, *newval, *oldval;
+  int i, offset;
 
   PyObject *ret = PyTuple_New(2);
   PyObject *o_vars, *o_cells;
@@ -138,50 +164,10 @@ static PyObject *frame_revert_vars(PyObject *self, PyObject *args) {
   }
 
   offset = code->co_nlocals;
-  ncells = PyTuple_GET_SIZE(code->co_cellvars);
+  fast_cells_swap(fast, offset, code->co_cellvars, revert_cells, o_cells);
 
-  for (i = ncells; i--; ) {
-    key = PyTuple_GET_ITEM(code->co_cellvars, i);
-    newcell = PyObject_GetItem(revert_cells, key);
-
-    if (newcell) {
-      oldcell = fast[offset + i];
-      if (newcell == nil) {
-	fast[offset + i] = NULL;
-	Py_DECREF(newcell);
-      } else {
-	fast[offset + i] = newcell;
-      }
-      PyObject_SetItem(o_cells, key, oldcell? oldcell: nil);
-      Py_XDECREF(oldcell);
-
-    } else {
-      PyErr_Clear();
-    }
-  }
-
-  offset += ncells;
-  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
-
-  for (i = nfreevars; i--; ) {
-    key = PyTuple_GET_ITEM(code->co_freevars, i);
-    newcell = PyObject_GetItem(revert_cells, key);
-
-    if (newcell) {
-      oldcell = fast[offset + i];
-      if (newcell == nil) {
-	fast[offset + i] = NULL;
-	Py_DECREF(newcell);
-      } else {
-	fast[offset + i] = newcell;
-      }
-      PyObject_SetItem(o_cells, key, oldcell? oldcell: nil);
-      Py_XDECREF(oldcell);
-
-    } else {
-      PyErr_Clear();
-    }
-  }
+  offset += PyTuple_GET_SIZE(code->co_cellvars);
+  fast_cells_swap(fast, offset, code->co_freevars, revert_cells, o_cells);
 
   return ret;
 }
@@ -200,11 +186,10 @@ static PyObject *frame_apply_vars(PyObject *self, PyObject *args) {
 
   PyCodeObject *code = frame->f_code;
   PyObject **fast = frame->f_localsplus;
-  int i, offset, ncells, nfreevars;
-  PyObject *key, *newcell, *oldcell;
-  PyObject *oldval;
+  PyObject *key, *newcell, *oldval;
+  int i, offset;
 
-  PyObject *o_vars, *o_cells;
+    PyObject *o_vars, *o_cells;
   PyObject *ret = PyTuple_New(2);
 
   o_vars = PyDict_New();
@@ -234,40 +219,10 @@ static PyObject *frame_apply_vars(PyObject *self, PyObject *args) {
   }
 
   offset = code->co_nlocals;
-  ncells = PyTuple_GET_SIZE(code->co_cellvars);
+  fast_cells_swap(fast, offset, code->co_cellvars, scopecells, o_cells);
 
-  for (i = ncells; i--; ) {
-    key = PyTuple_GET_ITEM(code->co_cellvars, i);
-    newcell = PyObject_GetItem(scopecells, key);
-
-    if (newcell) {
-      oldcell = fast[offset + i];
-      fast[offset + i] = newcell;
-      PyObject_SetItem(o_cells, key, oldcell? oldcell: nil);
-      Py_XDECREF(oldcell);
-
-    } else {
-      PyErr_Clear();
-    }
-  }
-
-  offset += ncells;
-  nfreevars = PyTuple_GET_SIZE(code->co_freevars);
-
-  for (i = nfreevars; i--; ) {
-    key = PyTuple_GET_ITEM(code->co_freevars, i);
-    newcell = PyObject_GetItem(scopecells, key);
-
-    if (newcell) {
-      oldcell = fast[offset + i];
-      fast[offset + i] = newcell;
-      PyObject_SetItem(o_cells, key, oldcell? oldcell: nil);
-      Py_XDECREF(oldcell);
-
-    } else {
-      PyErr_Clear();
-    }
-  }
+  offset += PyTuple_GET_SIZE(code->co_cellvars);
+  fast_cells_swap(fast, offset, code->co_freevars, scopecells, o_cells);
 
   return ret;
 }
