@@ -33,10 +33,11 @@ from ._frame import (cell_get_value, cell_set_value,
                      frame_apply_vars, frame_revert_vars)
 
 
-class nil(object):
-    def __repr__(self):
-        return "nil"
-nil = nil()
+#class nil(object):
+#    def __repr__(self):
+#        return "nil"
+#nil = nil()
+nil = object()
 
 
 class ScopeException(Exception):
