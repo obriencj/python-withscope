@@ -155,11 +155,17 @@ static PyObject *frame_revert_vars(PyObject *self, PyObject *args) {
     if (newval) {
       oldval = fast[i];
       if (newval == nil) {
+	// nil is our sentinel value meaning that a var should be
+	// cleared
 	fast[i] = NULL;
 	Py_DECREF(newval);
       } else {
 	fast[i] = newval;
       }
+
+      // nil used again here, if the var was previously unset, the
+      // value is NULL, so we'll denote that by putting nil in its
+      // place in the returned dict.
       PyObject_SetItem(o_vars, key, oldval? oldval: nil);
       Py_XDECREF(oldval);
 
@@ -194,7 +200,7 @@ static PyObject *frame_apply_vars(PyObject *self, PyObject *args) {
   PyObject *key, *newcell, *oldval;
   int i, offset;
 
-    PyObject *o_vars, *o_cells;
+  PyObject *o_vars, *o_cells;
   PyObject *ret = PyTuple_New(2);
 
   o_vars = PyDict_New();
