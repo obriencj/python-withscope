@@ -14,9 +14,8 @@
 
 
 """
-Provides a scoped lexical space via the `with let(...)`
-syntax. Does some really gross edits to the call frames to accomplish
-this.
+Provides a scoped lexical space via the `with let(...)` syntax.
+Does some really gross edits to the call frames to accomplish this.
 
 :author: Christopher O'Brien  <obriencj@gmail.com>
 :license: LGPL v.3
@@ -142,14 +141,14 @@ class Scope(object):
 
     def __getitem__(self, key):
         cell = self._cells.get(key, None)
-        if not cell:
+        if cell is None:
             raise KeyError(key)
         return cell_get_value(cell)
 
 
     def __setitem__(self, key, value):
         cell = self._cells.get(key, None)
-        if not cell:
+        if cell is None:
             cell = cell_from_value(value)
         else:
             cell_set_value(cell, value)
@@ -157,7 +156,7 @@ class Scope(object):
 
     def __delitem__(self, key):
         cell = self._cells.pop(key, None)
-        if not cell:
+        if cell is None:
             raise KeyError(key)
 
 
@@ -188,7 +187,13 @@ class Scope(object):
 
         inner_globals = None
         outer_globals = None
-        varnames = frame.f_code.co_varnames
+
+        # these are all the names we could have bound to
+        # locally. Anything else would require us to use a globals
+        # binding.
+        varnames = set(frame.f_code.co_varnames)
+        varnames.update(frame.f_code.co_cellvars)
+        varnames.update(frame.f_code.co_freevars)
 
         # construct an inner_globals for bindings that we could not
         # assign as local variables, cell variables, or free variables
@@ -199,6 +204,10 @@ class Scope(object):
                 inner_globals[key] = cell_get_value(val)
 
         if inner_globals is not None:
+            # if we have found that there are bindings which we
+            # couldn't assign to locally, when we'll have to place
+            # them in the globals for the frame, and keep a record of
+            # the original values to revert the change.
             outer_globals = frame_swap_globals(frame, inner_globals, nil)
 
         self._inner_globals = inner_globals
@@ -228,8 +237,6 @@ class Scope(object):
         for key, val in cells.iteritems():
             if val is n:
                 del self._cells[key]
-            else:
-                pass
 
         if self._inner_globals is not None:
             changes = frame_swap_globals(frame, self._outer_globals, n)
@@ -244,15 +251,18 @@ class Scope(object):
 
 
     def _refresh(self):
-        """ refresh the values of our defined cells from the fast vars
-        in our frame, if any. This happens automatically when the scope
-        exits as well."""
+        """
+        refresh the values of our defined cells from the fast vars in our
+        frame, if any. This happens automatically when the scope exits
+        as well.
+        """
 
         if not self._outer_frame:
             return
 
         # TODO: make a more direct version of this, that works with
-        # deleted vars
+        # deleted vars and only looks through fast vars (cell and free
+        # vars are always up-to-date)
         l = self._outer_frame.f_locals
         for key, val in l.iteritems():
             if key in self._cells:
@@ -333,17 +343,13 @@ def frame_swap_globals(frame, updates, nil):
             originals[key] = glbls[key]
             if val is nil:
                 del glbls[key]
-                del lcls[key]
+                lcls.pop(key, None)
             else:
                 glbls[key] = val
                 lcls[key] = val
         else:
             originals[key] = nil
-            if val is nil:
-                # nothing to do, this is a delete sentinel and it's
-                # already not present.
-                pass
-            else:
+            if val is not nil:
                 glbls[key] = val
                 lcls[key] = val
 
