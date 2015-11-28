@@ -172,6 +172,87 @@ class LetTest(TestCase):
             self.assertEquals(b[0], "fajita")
 
 
+    def test_unasigned_closure(self):
+
+        def getter():
+            return ourval
+
+        with let(ourval="pizza"):
+            # ourval is later defined, but not currently assigned, but
+            # we capture a closure to the unassigned cell above and again
+            # from within this scope.
+
+            def other_getter():
+                return ourval
+
+        # when the scope exits, it should be putting back an undefined
+        # cell value.
+
+        self.assertEquals(other_getter(), "pizza")
+        self.assertRaises(NameError, getter)
+
+        ourval = "tacos"
+        self.assertEquals(getter(), "tacos")
+        self.assertEquals(other_getter(), "pizza")
+
+
+    def test_nonlocal(self):
+
+        with let(a="tacos", b="soda") as my_scope:
+            self.assertEquals(a, "tacos")
+            self.assertEquals(b, "soda")
+
+        self.assertTrue("a" in my_scope)
+        self.assertTrue("b" in my_scope)
+
+        self.assertTrue("a" not in locals())
+        self.assertTrue("a" not in globals())
+
+        self.assertTrue("b" not in locals())
+        self.assertTrue("b" not in globals())
+
+
+    def test_local_del(self):
+        a = "pizza"
+        b = "beer"
+
+        with let(a="tacos", b="soda") as my_scope:
+            del a
+            del b
+
+        self.assertTrue("a" not in my_scope)
+        self.assertTrue("b" not in my_scope)
+        self.assertEquals(a, "pizza")
+        self.assertEquals(b, "beer")
+
+
+    def test_nonlocal_del(self):
+        # weird pythonism: the statement `del a` WITHOUT a `global a`
+        # causes the compiler to create an empty fast local variable
+        # named `a` with a NULL value, which it then deletes (setting
+        # the value again to NULL. In other words, the del statement
+        # counts as an assignment in the eyes of the compiler.
+
+        global a, b
+
+        a = "remove me"
+
+        with let(a="tacos", b="soda") as my_scope:
+            self.assertTrue("a" in globals())
+            self.assertTrue("b" in globals())
+            del a
+            del b
+
+        self.assertTrue("a" not in my_scope)
+        self.assertTrue("b" not in my_scope)
+
+        self.assertEquals(a, "remove me")
+        del a
+
+        self.assertTrue("a" not in globals())
+        self.assertTrue("b" not in globals())
+
+
     def test_del_fast_local(self):
         a = "tacos"
 
