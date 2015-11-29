@@ -129,10 +129,8 @@ interesting things about frames, the allocator, and some of the
 bytecode implementation details. I'd like to take all of that and
 write it up for educational purposes, perhaps as a blog entry.
 
-I'd like to see if it's possible for me to rip out the
-`LayeredMapping` class entirely. Right now I use it as a frame locals
-replacement, but I think I may be able to just skip that and only
-modify frame fast locals, cells, and globals.
+I have a few things I might like to scoot over into the extension and
+out of the python module, but they work as-is.
 
 
 ## Requirements
@@ -211,10 +209,7 @@ available online:
 * write more examples, eg. depicting the use of `Scope.alias()`
 * a scope that references an object's attributes via getattr (for use
   with something like the option object from `optparser`)
-* profiling and optimizations?
-* can we remove LayeredMapping? (leaning towards no, so can we optimize?)
-* specialty allocator that caches a copy on the calling frame or code
-  object (or more likely a threadlocal mapping to the code instance)
+* profiling and optimizations? Do I care?
 
 
 ## Author
