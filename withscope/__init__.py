@@ -150,6 +150,7 @@ class Scope(object):
         cell = self._cells.get(key, None)
         if cell is None:
             cell = cell_from_value(value)
+            self._cells[key] = cell
         else:
             cell_set_value(cell, value)
 
@@ -234,9 +235,11 @@ class Scope(object):
             else:
                 cell_set_value(self._cells[key], val)
 
-        for key, val in cells.iteritems():
-            if val is n:
-                del self._cells[key]
+        # Python won't actually allow you to delete free or cell vars,
+        # only normal locals.
+        # for key, val in cells.iteritems():
+        #    if val is n:
+        #        del self._cells[key]
 
         if self._inner_globals is not None:
             changes = frame_swap_globals(frame, self._outer_globals, n)
