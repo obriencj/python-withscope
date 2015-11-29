@@ -380,5 +380,53 @@ class LetTest(TestCase):
         self.assertEquals(globals()["_b"], "soda")
 
 
+    def test_accessors(self):
+
+        a = "tacos"
+        with let(a="pizza", b="beer") as my_scope:
+            pass
+
+        self.assertEquals(my_scope["a"], "pizza")
+        self.assertEquals(my_scope["b"], "beer")
+
+        self.assertRaises(KeyError, lambda: my_scope["c"])
+
+        my_scope["a"] = "burger"
+        my_scope["c"] = "fries"
+
+        self.assertEquals(my_scope["c"], "fries")
+
+        self.assertTrue("a" in my_scope)
+        self.assertTrue("b" in my_scope)
+        self.assertTrue("c" in my_scope)
+
+        with my_scope:
+            self.assertEquals(a, "burger")
+            self.assertEquals(b, "beer")
+            self.assertEquals(c, "fries")
+
+        del my_scope["a"]
+        del my_scope["c"]
+
+        self.assertRaises(KeyError, lambda: my_scope["a"])
+        self.assertRaises(KeyError, lambda: my_scope["c"])
+
+        self.assertTrue("a" not in my_scope)
+        self.assertTrue("b" in my_scope)
+        self.assertTrue("c" not in my_scope)
+
+        with my_scope:
+            self.assertEquals(a, "tacos")
+            self.assertEquals(b, "beer")
+
+            self.assertRaises(NameError, lambda: c)
+
+        def do_del(var):
+            del my_scope[var]
+
+        self.assertRaises(KeyError, do_del, "a")
+        self.assertRaises(KeyError, do_del, "c")
+
+
 #
 # The end.
