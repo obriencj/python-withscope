@@ -25,6 +25,7 @@ Does some really gross edits to the call frames to accomplish this.
 __all__ = ("let", "Scope", "ScopeException", "ScopeInUse", "ScopeMismatch")
 
 
+from abc import ABCMeta
 from inspect import currentframe
 
 from ._frame import (cell_get_value, cell_set_value,
@@ -44,7 +45,12 @@ class ScopeException(Exception):
     Base class for the ScopeInUse and ScopeMismatch errors.
     """
 
-    pass
+    __metaclass__ = ABCMeta
+
+
+    @property
+    def scope(self):
+        return self.args[0]
 
 
 class ScopeInUse(ScopeException):
@@ -54,7 +60,13 @@ class ScopeInUse(ScopeException):
     which can be re-used while the original was stil in use
     """
 
-    pass
+    def __init__(self, scope, frame):
+        super(ScopeInUse, self).__init__(scope, frame)
+
+
+    @property
+    def frame(self):
+        return self.args[1]
 
 
 class ScopeMismatch(ScopeException):
@@ -65,7 +77,18 @@ class ScopeMismatch(ScopeException):
     method of the Scope, incorrectly.
     """
 
-    pass
+    def __init__(self, scope, frame, wrong_frame):
+        super(ScopeMismatch, self).__init__(scope, frame, wrong_frame)
+
+
+    @property
+    def frame(self):
+        return self.args[1]
+
+
+    @property
+    def wrong_frame(self):
+        return self.args[2]
 
 
 class Scope(object):
@@ -282,7 +305,7 @@ class Scope(object):
         #print "__enter__ for %08x" % id(self)
 
         if self._outer_frame:
-            raise ScopeInUse()
+            raise ScopeInUse(self, self._outer_frame)
 
         caller = currentframe().f_back
         self._outer_frame = caller
@@ -308,7 +331,7 @@ class Scope(object):
 
         caller = currentframe().f_back
         if self._outer_frame is not caller:
-            raise ScopeMismatch()
+            raise ScopeMismatch(self, self._outer_frame, caller)
 
         # if we are an alias, we have to first let the parent
         # get a sync'd copy of its variables from the frame.
