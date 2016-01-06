@@ -21,6 +21,7 @@ Unit tests for withscope
 """
 
 
+from inspect import currentframe
 from unittest import TestCase
 from withscope import let, ScopeInUse, ScopeMismatch
 
@@ -302,6 +303,23 @@ class LetTest(TestCase):
         self.assertTrue("a" not in globals())
 
 
+    def test_scope_in_use(self):
+        with let(a=1, b=2) as scope:
+            self.assertRaises(ScopeInUse, scope.__enter__)
+
+        # raise the exception again, but keep it around for
+        # observation
+        with scope:
+            try:
+                scope.__enter__()
+            except ScopeInUse as siu:
+                pass
+
+        # check the error proprties were set correctly
+        self.assertEquals(scope, siu.scope)
+        self.assertEquals(currentframe(), siu.frame)
+
+
     def test_alias(self):
         a = "hungry"
         b = "thirsty"
@@ -339,17 +357,30 @@ class LetTest(TestCase):
 
 
     def test_mismatch(self):
+        closer_frame = [None]
         scope = let(a="pizza", b="beer")
 
         scope.__enter__()
         self.assertTrue(scope.in_use())
 
         def closer():
+            closer_frame[0] = currentframe()
             scope.__exit__(None, None, None)
 
         # calling closer executes the scope exit inside closer's frame
         # rather than this frame, which is a mismatch.
         self.assertRaises(ScopeMismatch, closer)
+
+        # raise the exception again, but keep it for observation
+        try:
+            closer()
+        except ScopeMismatch as smm:
+            pass
+
+        # testing the correct fields were gathered
+        self.assertEquals(scope, smm.scope)
+        self.assertEquals(currentframe(), smm.frame)
+        self.assertEquals(closer_frame[0], smm.wrong_frame)
 
         # we need to clean up that __enter__ so globals isn't a mess
         # for later tests
@@ -358,6 +389,8 @@ class LetTest(TestCase):
         with scope.alias():
             self.assertEquals(a, "pizza")
             self.assertEquals(b, "beer")
+
+
 
 
     def test_with_globals(self):
