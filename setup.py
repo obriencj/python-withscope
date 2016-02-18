@@ -35,7 +35,7 @@ TROVE_CLASSIFIERS = (
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved"
-    " :: GNU General Public License v3 or later (GPLv3+)",
+    " :: GNU Lesser General Public License v3 or later (LGPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 2 :: Only",
     "Programming Language :: Python :: 2.6",
@@ -62,7 +62,7 @@ setup(name = "withscope",
       author = "Christopher O'Brien",
       author_email = "obriencj@gmail.com",
       url = "https://github.com/obriencj/python-withscope",
-      license = "GNU Lesser General Public License",
+      license = "GNU Lesser General Public License v3",
 
       description = "Context manager providing nesting lexical scopes",
 
